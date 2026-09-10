@@ -1,13 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "ProcureNet",
+  "projectType": "saas",
+  "projectName": "ProcureNet",
+  "projectDescription": "An AI-powered procurement and checkout orchestration platform that routes buyer sessions via a Wallet Confidence Score, manages crypto (USDC) settlement for field evaluations, and coordinates a distributed AI agent swarm for end-to-end procurement workflows.",
   "theme": "luma",
-  "colors": {
-    "primary": "#6C47FF",
-    "light": "#EDE9FF",
-    "dark": "#3B1FA8"
-  },
-  "favicon": "/favicon.svg",
+  "primaryColor": "#6C47FF",
+  "lightColor": "#EDE9FF",
+  "darkColor": "#3B1FA8",
   "navigation": {
     "tabs": [
       {
@@ -80,10 +78,27 @@
       }
     ]
   },
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/mindtdilly"
-    }
-  }
+  "keyFeatures": [
+    "Wallet Confidence Score (WCS) engine that classifies buyer sessions and routes them to resolved, partial, or anonymous checkout flows",
+    "Stateful session orchestration API (v7) with SSE and WebSocket transport based on session mode",
+    "VCI field evaluation to USDC stablecoin payment bridge with GPS-tagged offline sync",
+    "Escrow acceptance flow for high-value transactions with legal compliance checkpoints",
+    "OpenClaw AI agent swarm (10+ worker classes) for intelligent procurement automation",
+    "Local-first vector store for WCS profiles, contract rules, translations, and entitlements",
+    "Procurement Express webhook integration with HMAC signature verification",
+    "Multi-chain USDC settlement on Base, Arbitrum, Polygon, and Ethereum"
+  ],
+  "publicApiSurface": [
+    "POST /api/v7/orchestrate",
+    "GET /api/v7/sessions/{id}/prefill",
+    "POST /api/v7/sessions/{id}/escrow-accept",
+    "POST /api/v7/sessions/{id}/transition",
+    "POST /api/v7/sessions/{id}/funding-method",
+    "POST /webhooks/procurement",
+    "POST /mods/procurement_wallet/usdc/request",
+    "GET /mods/procurement_wallet/usdc/watch/{paymentId}",
+    "POST /mods/procurement_wallet/usdc/manual-confirm",
+    "WCSEngine.score(signals) → WCSResult",
+    "VCIProcureNetBridge.handleSyncEvent(event) → PaymentRequest"
+  ]
 }

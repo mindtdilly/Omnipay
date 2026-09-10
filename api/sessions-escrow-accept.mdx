@@ -1,0 +1,113 @@
+---
+title: "POST /api/v7/sessions/{id}/escrow-accept"
+sidebarTitle: "POST /escrow-accept"
+description: "Accept escrow for a high-value procurement session. Writes an immutable audit trail entry before confirmation. This action cannot be undone."
+---
+
+When a procurement session involves a transaction above the high-value threshold, ProcureNet moves the session into `escrow_pending` state and requires explicit escrow acceptance before payment can proceed. This endpoint records your acceptance, writes an immutable audit trail entry, and advances the session so the payment pipeline can continue. Because this action has legal and financial consequences, the endpoint requires a valid Bearer JWT and performs strict session-scope verification before committing anything.
+
+## Authentication
+
+<Warning>
+  This endpoint requires a valid Bearer JWT in the `Authorization` header. Requests without a token, or with an expired or malformed token, receive `401 Unauthorized`. A valid token that does not own the session receives `403 Forbidden`.
+</Warning>
+
+```
+Authorization: Bearer <your_jwt>
+```
+
+## Path Parameters
+
+<ParamField path="id" type="string" required>
+  The session ID returned by `POST /api/v7/orchestrate`. The session must currently be in `escrow_pending` state.
+</ParamField>
+
+## Request Body
+
+No request body is required. Send the request with no body, or an empty JSON object.
+
+## Request Example
+
+```typescript
+const sessionId = 'sess_abc123';
+
+const res = await fetch(
+  `https://api.procurenet.io/api/v7/sessions/${sessionId}/escrow-accept`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...',
+      'Content-Type': 'application/json'
+    }
+  }
+);
+
+const result = await res.json();
+// {
+//   "session_id": "sess_abc123",
+//   "status": "escrow_accepted",
+//   "audit_entry_id": "audit_7x9k2m",
+//   "accepted_at": "2026-04-01T15:04:22Z"
+// }
+```
+
+## Response Fields
+
+<ResponseField name="session_id" type="string" required>
+  Echoes back the session ID for correlation.
+</ResponseField>
+
+<ResponseField name="status" type="string" required>
+  The new session status after acceptance. Will be `"escrow_accepted"` on success.
+</ResponseField>
+
+<ResponseField name="audit_entry_id" type="string" required>
+  The unique identifier for the immutable audit trail record written at the moment of acceptance. Retain this value for compliance and dispute resolution.
+</ResponseField>
+
+<ResponseField name="accepted_at" type="string" required>
+  ISO 8601 timestamp of when the escrow acceptance was recorded. This timestamp is co-written to the audit trail and cannot be amended.
+</ResponseField>
+
+## Response Example
+
+```json
+{
+  "session_id": "sess_abc123",
+  "status": "escrow_accepted",
+  "audit_entry_id": "audit_7x9k2m",
+  "accepted_at": "2026-04-01T15:04:22Z"
+}
+```
+
+<Warning>
+  **Escrow acceptance is irreversible.** Once this endpoint returns `200`, the audit trail entry is sealed and cannot be modified or deleted. Ensure the buyer has explicitly confirmed the transaction before calling this endpoint. If you need to cancel after acceptance, contact ProcureNet support — a manual reversal process exists but is subject to review.
+</Warning>
+
+## Typical Flow
+
+<Steps>
+  <Step title="Detect escrow_pending state">
+    After calling `POST /api/v7/sessions/{id}/transition`, check whether the response `current_state` is `escrow_pending`. This indicates the transaction exceeded the high-value threshold.
+  </Step>
+  <Step title="Present escrow disclosure to the buyer">
+    Display the transaction amount, escrow terms, and an explicit confirmation prompt to the buyer. Do not call this endpoint until the buyer actively confirms.
+  </Step>
+  <Step title="Call escrow-accept">
+    Send the `POST` request with the session ID and your Bearer JWT. Store the `audit_entry_id` from the response in your own records.
+  </Step>
+  <Step title="Proceed to funding">
+    After a successful `200` response, call `POST /api/v7/sessions/{id}/funding-method` to complete the payment setup.
+  </Step>
+</Steps>
+
+## Error Codes
+
+| HTTP Status | Description |
+|---|---|
+| `401 Unauthorized` | Missing, expired, or invalid Bearer JWT. |
+| `403 Forbidden` | The authenticated identity does not match the session owner, or the session is not in `escrow_pending` state. |
+| `404 Not Found` | No session exists for the provided `id`. |
+| `409 Conflict` | Escrow has already been accepted for this session. Check your `audit_entry_id` from the original call. |
+| `410 Gone` | The session has expired. Start a new session with `POST /api/v7/orchestrate`. |
+| `500 Internal Server Error` | Audit trail write failure. The acceptance was **not** recorded. Safe to retry. |

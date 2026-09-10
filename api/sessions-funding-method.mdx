@@ -1,0 +1,208 @@
+---
+title: "POST /api/v7/sessions/{id}/funding-method"
+sidebarTitle: "POST /funding-method"
+description: "Bind a payment method to an active procurement session. Accepts USDC on-chain, card, or bank transfer. Replaces the deprecated POST /api/payments/route."
+---
+
+Once a procurement session is ready for payment, this endpoint binds a funding method to it. You specify the method type — USDC, card, or bank transfer — and for USDC payments, the target blockchain network. ProcureNet validates the combination against the session's state and the buyer's entitlements stored in the local vector store, then advances the session toward payment processing. This endpoint replaces the deprecated `POST /api/payments/route` — if your integration still uses that path, follow the migration guidance at the bottom of this page.
+
+## Authentication
+
+<Warning>
+  This endpoint requires a valid Bearer JWT in the `Authorization` header. Requests without a token, or with an expired or malformed token, receive `401 Unauthorized`.
+</Warning>
+
+```
+Authorization: Bearer <your_jwt>
+```
+
+## Path Parameters
+
+<ParamField path="id" type="string" required>
+  The session ID returned by `POST /api/v7/orchestrate`. The session must be in a state that accepts a funding method (for example, `pending_payment` or `escrow_accepted`).
+</ParamField>
+
+## Request Body
+
+<ParamField body="method" type="string" required>
+  The payment method to bind to this session. Accepted values:
+
+  | Value | Description |
+  |---|---|
+  | `usdc` | On-chain USDC transfer. Requires the `network` field. |
+  | `card` | Credit or debit card. Network field is ignored. |
+  | `bank_transfer` | ACH or wire transfer. Network field is ignored. |
+</ParamField>
+
+<ParamField body="network" type="string">
+  The blockchain network for USDC transfers. Required when `method` is `"usdc"`. Ignored for all other methods.
+
+  Supported values: `base`, `arbitrum`, `polygon`, `ethereum`.
+
+  <Tip>
+    `base` offers the lowest gas fees for most USDC transfers and is the recommended network unless your buyer or contract rules require otherwise.
+  </Tip>
+</ParamField>
+
+## Request Examples
+
+<CodeGroup>
+
+```typescript USDC on Base
+const sessionId = 'sess_abc123';
+
+const res = await fetch(
+  `https://api.procurenet.io/api/v7/sessions/${sessionId}/funding-method`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      method: 'usdc',
+      network: 'base'
+    })
+  }
+);
+
+const result = await res.json();
+```
+
+```typescript Card Payment
+const sessionId = 'sess_abc123';
+
+const res = await fetch(
+  `https://api.procurenet.io/api/v7/sessions/${sessionId}/funding-method`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      method: 'card'
+    })
+  }
+);
+
+const result = await res.json();
+```
+
+```typescript Bank Transfer
+const sessionId = 'sess_abc123';
+
+const res = await fetch(
+  `https://api.procurenet.io/api/v7/sessions/${sessionId}/funding-method`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      method: 'bank_transfer'
+    })
+  }
+);
+
+const result = await res.json();
+```
+
+</CodeGroup>
+
+## Response Fields
+
+<ResponseField name="session_id" type="string" required>
+  Echoes back the session ID.
+</ResponseField>
+
+<ResponseField name="method" type="string" required>
+  Confirms the payment method that was bound to the session.
+</ResponseField>
+
+<ResponseField name="network" type="string">
+  The blockchain network confirmed for USDC transfers. Present only when `method` is `"usdc"`.
+</ResponseField>
+
+<ResponseField name="status" type="string" required>
+  The session status after the funding method was set. Typically `"payment_processing"` once the session advances.
+</ResponseField>
+
+## Response Example
+
+```json
+{
+  "session_id": "sess_abc123",
+  "method": "usdc",
+  "network": "base",
+  "status": "payment_processing"
+}
+```
+
+## Supported Networks for USDC
+
+<CardGroup cols={2}>
+  <Card title="Base" icon="circle-check">
+    Lowest fees. Recommended for most USDC transactions.
+  </Card>
+  <Card title="Arbitrum" icon="circle-check">
+    Low fees, high throughput. Good alternative to Base.
+  </Card>
+  <Card title="Polygon" icon="circle-check">
+    Widely supported. Use when buyer wallets are Polygon-native.
+  </Card>
+  <Card title="Ethereum" icon="circle-check">
+    Highest security and liquidity. Higher gas fees apply.
+  </Card>
+</CardGroup>
+
+## Migration from POST /api/payments/route
+
+<Note>
+  `POST /api/payments/route` is **deprecated** and will be removed in a future release. Migrate all integrations to the v7 session flow.
+</Note>
+
+Replace your existing single-call payment routing with the two-step v7 session pattern:
+
+<Steps>
+  <Step title="Start an orchestration session">
+    Replace your call to `POST /api/payments/route` with a call to `POST /api/v7/orchestrate`. Pass your transaction amount, currency, and any buyer hints.
+
+    ```typescript
+    // Before (deprecated)
+    await fetch('/api/payments/route', {
+      method: 'POST',
+      body: JSON.stringify({ amount: 500, currency: 'USD', paymentMethod: 'usdc' })
+    });
+
+    // After
+    const session = await fetch('/api/v7/orchestrate', {
+      method: 'POST',
+      body: JSON.stringify({ amount: 500, currency: 'USD', hints: { email: 'buyer@example.com' } })
+    }).then(r => r.json());
+    ```
+  </Step>
+  <Step title="Set the funding method on the session">
+    Take the `session_id` from the orchestrate response and call this endpoint to bind your payment method.
+
+    ```typescript
+    await fetch(`/api/v7/sessions/${session.session_id}/funding-method`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${jwt}` },
+      body: JSON.stringify({ method: 'usdc', network: 'base' })
+    });
+    ```
+  </Step>
+</Steps>
+
+## Error Codes
+
+| HTTP Status | Description |
+|---|---|
+| `400 Bad Request` | Missing required fields, unrecognized `method` value, or `method` is `"usdc"` but `network` is absent or invalid. |
+| `401 Unauthorized` | Missing, expired, or invalid Bearer JWT. |
+| `403 Forbidden` | The session state does not permit setting a funding method at this point (for example, escrow acceptance is still required). |
+| `404 Not Found` | No session exists for the provided `id`. |
+| `409 Conflict` | A funding method is already set for this session. Transition to a new session if you need to change it. |
+| `410 Gone` | The session has expired. Start a new session with `POST /api/v7/orchestrate`. |

@@ -1,0 +1,183 @@
+---
+title: "Integrate ProcureNet Checkout into Your App"
+sidebarTitle: "Integrate Checkout"
+description: "Embed ProcureNet's AI-orchestrated checkout flow into your app — from collecting buyer signals to advancing through session states."
+---
+
+ProcureNet's checkout orchestration flow starts the moment you send buyer signals to the session API. The platform scores those signals using the Wallet Confidence Score (WCS) engine, selects the right transport layer, and returns a session your frontend connects to in real time. This guide walks you through every step, from collecting buyer hints to advancing the session to a completed state.
+
+<Steps>
+
+### Collect Buyer Signals
+
+Before starting a session, gather the buyer signals you have available. ProcureNet's WCS engine weights each signal and assigns a score out of 200. The higher the score, the richer the prefill data you get and the more optimized the transport.
+
+<CardGroup cols={2}>
+  <Card title="customerId" icon="fingerprint">
+    **100 pts** — Your internal customer identifier. The single highest-value signal. Always pass this when the buyer is authenticated.
+  </Card>
+  <Card title="email" icon="envelope">
+    **40 pts** — Buyer's email address. Optional but strongly recommended for guest or partially-identified buyers.
+  </Card>
+  <Card title="phone" icon="phone">
+    **40 pts** — Buyer's phone number. Combines with email to push partial sessions closer to the resolved threshold.
+  </Card>
+  <Card title="deviceId" icon="mobile">
+    **20 pts** — A stable device fingerprint. Optional, but it can be the deciding factor for crossing key score thresholds.
+  </Card>
+</CardGroup>
+
+The WCS engine uses these scores to classify the session into one of three modes:
+
+| Score Range | Mode | Transport |
+|---|---|---|
+| ≥ 100 | `resolved` | SSE |
+| 40 – 99 | `partial` | WebSocket |
+| < 40 | `anonymous` | WebSocket |
+
+<Tip>
+  Pass `deviceId` alongside `email` or `phone` to reach a WCS of 100 even without a `customerId`. A score of 100 unlocks the `resolved` mode and SSE transport — which enables full prefill.
+</Tip>
+
+### Start the Orchestration Session
+
+Call `POST /api/v7/orchestrate` with your buyer hints and transaction details. The response includes the `session_id`, WCS score, resolved mode, and the transport your client should connect to.
+
+```typescript
+const res = await fetch('https://api.procurenet.io/api/v7/orchestrate', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`
+  },
+  body: JSON.stringify({
+    amount: 250.00,
+    currency: 'USD',
+    hints: {
+      customerId: 'cust_123',
+      email: 'buyer@example.com'
+    }
+  })
+});
+
+const { session_id, wcs_score, mode, transport } = await res.json();
+```
+
+Store `session_id` — every subsequent API call in this checkout flow requires it.
+
+### Connect to the Session Stream
+
+Use the `transport` value from the previous response to open the appropriate real-time connection to your session.
+
+<Tabs>
+  <Tab title="SSE (resolved mode)">
+    Use SSE when `transport` is `"sse"`. This is the most reliable transport for fully-identified buyers.
+
+    ```typescript
+    const eventSource = new EventSource(
+      `https://api.procurenet.io/api/v7/sessions/${session_id}/stream`,
+      { withCredentials: true }
+    );
+
+    eventSource.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log('Session state:', data.state);
+    };
+    ```
+  </Tab>
+  <Tab title="WebSocket (partial / anonymous)">
+    Use WebSocket when `transport` is `"websocket"`. This handles partial and anonymous sessions.
+
+    ```typescript
+    const ws = new WebSocket(
+      `wss://api.procurenet.io/api/v7/sessions/${session_id}/stream`
+    );
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log('Session state:', data.state);
+    };
+    ```
+  </Tab>
+</Tabs>
+
+### Handle Prefill for Resolved Sessions
+
+If `mode` is `"resolved"` (WCS ≥ 100), call `GET /api/v7/sessions/{id}/prefill` to retrieve stored buyer data and pre-populate your checkout form. This endpoint is only available for resolved sessions.
+
+```typescript
+const prefillRes = await fetch(
+  `https://api.procurenet.io/api/v7/sessions/${session_id}/prefill`,
+  {
+    headers: {
+      'Authorization': `Bearer ${token}`
+    }
+  }
+);
+
+const prefillData = await prefillRes.json();
+// prefillData contains address, payment method hints, and buyer profile fields
+```
+
+<Note>
+  Calling `/prefill` on a `partial` or `anonymous` session returns a `403`. Always guard this call with a `mode === 'resolved'` check.
+</Note>
+
+### Set the Funding Method
+
+Once the buyer has selected a payment method, register it against the session by calling `POST /api/v7/sessions/{id}/funding-method`.
+
+```typescript
+const fundingRes = await fetch(
+  `https://api.procurenet.io/api/v7/sessions/${session_id}/funding-method`,
+  {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({
+      type: 'card',
+      token: 'pm_tok_visa_4242'
+    })
+  }
+);
+```
+
+### Advance Through Session States
+
+Call `POST /api/v7/sessions/{id}/transition` to move the session forward through ProcureNet's state machine. Transitions are event-driven — pass the target event name to advance.
+
+```typescript
+const transitionRes = await fetch(
+  `https://api.procurenet.io/api/v7/sessions/${session_id}/transition`,
+  {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`
+    },
+    body: JSON.stringify({ event: 'confirm' })
+  }
+);
+
+const { state } = await transitionRes.json();
+console.log('New session state:', state);
+```
+
+Listen on your stream connection for real-time state change events alongside explicit transition calls.
+
+</Steps>
+
+## Migrating from the Legacy Payments Route
+
+<Warning>
+  `POST /api/payments/route` is deprecated and will be removed in a future release. Migrate to `POST /api/v7/orchestrate` as soon as possible.
+</Warning>
+
+The legacy `POST /api/payments/route` endpoint does not support WCS scoring, session streaming, or prefill. To migrate:
+
+1. Replace calls to `/api/payments/route` with `POST /api/v7/orchestrate`.
+2. Update your response handling to read `session_id`, `wcs_score`, `mode`, and `transport` from the new response shape.
+3. Connect to the session stream using the transport returned in step 2.
+4. Use `/funding-method` and `/transition` to replace any inline payment routing logic you had in the old flow.

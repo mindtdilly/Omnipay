@@ -1,0 +1,121 @@
+---
+title: "Poll USDC Payment Confirmation — Watch Endpoint"
+sidebarTitle: "GET /usdc/watch"
+description: "Poll an active USDC payment request for on-chain confirmation. Returns confirmed status and a transaction hash once the transfer is detected."
+---
+
+After creating a USDC payment request, use the watch endpoint to check whether the corresponding on-chain transfer has been confirmed. You call this endpoint periodically, passing the `payment_id` returned by the create endpoint, until `confirmed` is `true`. When you initialize `ProcureNetWalletClient` with `autoWatch: true`, the `VCIProcureNetBridge` handles this polling loop automatically after every successful evaluation sync — you only need to call this endpoint directly when managing the polling lifecycle yourself.
+
+## Endpoint
+
+```http
+GET /mods/procurement_wallet/usdc/watch/{paymentId}
+```
+
+## Authentication
+
+Requests require your mod API key in the `x-perplexity-mod-key` header.
+
+```text
+x-perplexity-mod-key: <your-api-key>
+```
+
+## Path Parameters
+
+<ParamField path="paymentId" type="string" required>
+  The `payment_id` returned when you created the payment request via [`POST /usdc/request`](/api/usdc-request). This value is also stored in your queue record's metadata under the key `procurenet_payment_id` when using `VCIProcureNetBridge`.
+</ParamField>
+
+## Polling Behavior
+
+Call this endpoint on a fixed interval until the response includes `"confirmed": true`. A reasonable starting interval is every 10–15 seconds for `base` and `arbitrum` networks, and every 30–60 seconds for `ethereum` mainnet.
+
+<Note>
+  If `autoWatch: true` is set on your `ProcureNetWalletClient` instance, `VCIProcureNetBridge` automatically calls `watchPayment()` for you after initiating settlement. You do not need to poll manually in that case.
+</Note>
+
+## Code Example
+
+<CodeGroup>
+```typescript TypeScript
+import { ProcureNetWalletClient } from './integrations/VCIProcureNetBridge';
+
+const wallet = new ProcureNetWalletClient(
+  'https://api.procurenet.io',
+  process.env.PROCURENET_MOD_KEY!
+);
+
+// Manual polling loop
+async function pollUntilConfirmed(paymentId: string): Promise<string | undefined> {
+  const INTERVAL_MS = 15_000;
+  const MAX_ATTEMPTS = 40; // ~10 minutes
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const result = await wallet.watchPayment(paymentId);
+
+    if (result.confirmed) {
+      console.log('Transaction confirmed:', result.transaction_hash);
+      return result.transaction_hash;
+    }
+
+    console.log(`Attempt ${attempt + 1}: not yet confirmed. Retrying...`);
+    await new Promise(resolve => setTimeout(resolve, INTERVAL_MS));
+  }
+
+  console.warn('Payment not confirmed within polling window.');
+  return undefined;
+}
+
+const txHash = await pollUntilConfirmed('pay_xyz789');
+```
+
+```bash cURL
+curl -X GET \
+  https://api.procurenet.io/mods/procurement_wallet/usdc/watch/pay_xyz789 \
+  -H "x-perplexity-mod-key: $PROCURENET_MOD_KEY"
+```
+</CodeGroup>
+
+## Response
+
+<ResponseField name="confirmed" type="boolean" required>
+  `true` when the on-chain transaction has been detected and confirmed. `false` if the payment is still pending or has expired without a matching transfer.
+</ResponseField>
+
+<ResponseField name="transaction_hash" type="string">
+  The blockchain transaction hash for the confirmed transfer. This field is only present when `confirmed` is `true`. Store this value for auditing and reconciliation.
+</ResponseField>
+
+### Example Response — Pending
+
+```json
+{
+  "confirmed": false
+}
+```
+
+### Example Response — Confirmed
+
+```json
+{
+  "confirmed": true,
+  "transaction_hash": "0x4f3c8b2a1e9d7f6c0b5a4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b"
+}
+```
+
+## Expired Payments
+
+<Warning>
+  If a payment request expires before the transfer is confirmed, this endpoint returns `"confirmed": false` with no `transaction_hash`. The payment request cannot be reactivated. Create a new payment request via [`POST /usdc/request`](/api/usdc-request) and restart the confirmation flow.
+</Warning>
+
+## Error Codes
+
+| Status | Meaning |
+|---|---|
+| `401` | Missing or invalid `x-perplexity-mod-key` header |
+| `404` | No payment found for the given `paymentId` |
+
+<Tip>
+  Once you receive `"confirmed": true`, update your internal records immediately. The `VCIProcureNetBridge` writes `status: "payment_confirmed"` and `tx_hash` back to the queue record automatically when using the bridge's built-in watch flow.
+</Tip>

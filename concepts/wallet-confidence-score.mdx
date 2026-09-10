@@ -1,0 +1,70 @@
+---
+title: "What Is the Wallet Confidence Score?"
+sidebarTitle: "WCS"
+description: "Learn how ProcureNet scores buyer identity signals to determine session mode, transport, and checkout experience at orchestration time."
+---
+
+The Wallet Confidence Score (WCS) is ProcureNet's buyer identity scoring engine. Every time a session is created, the WCS engine evaluates the signals you supply — such as a customer ID, email address, phone number, or device fingerprint — assigns weighted point values to each, and produces a numeric score. That score determines which orchestration mode the session enters and which real-time transport protocol is used to deliver events. The higher the score, the more ProcureNet knows about the buyer, and the more streamlined the checkout experience becomes.
+
+## Scoring Signals
+
+Each signal you pass in the `hints` object of `POST /api/v7/orchestrate` contributes a fixed number of points toward the total WCS. Signals are additive — providing more signals always raises the score.
+
+<ParamField body="customerId" type="string">
+  **100 points** — The strongest possible signal. A recognized customer ID confirms a returning buyer with a known purchase history. Supplying this alone is enough to enter resolved mode.
+</ParamField>
+
+<ParamField body="email" type="string">
+  **40 points** — A verified email address. Combined with a customer ID, this raises the score to 140 and reinforces identity confidence.
+</ParamField>
+
+<ParamField body="phone" type="string">
+  **40 points** — A verified phone number. Carries the same weight as email and can substitute for it when email is unavailable.
+</ParamField>
+
+<ParamField body="deviceId" type="string">
+  **20 points** — A device fingerprint or persistent device identifier. Useful for recognizing repeat sessions from the same hardware even without account credentials.
+</ParamField>
+
+The maximum possible score is **200 points**, achieved by supplying all four signals.
+
+## Score Thresholds and Routing
+
+ProcureNet maps WCS ranges to orchestration modes and transport protocols. The assignment happens at session creation and is immutable for the lifetime of that session.
+
+| Score Range | Mode | Transport | Prefill Available |
+|---|---|---|---|
+| ≥ 100 | `resolved` | Server-Sent Events (SSE) | Yes |
+| 40 – 99 | `partial` | WebSocket | No |
+| < 40 | `anonymous` | WebSocket | No |
+
+See [Orchestration Modes](/concepts/orchestration-modes) for a full breakdown of what each mode enables.
+
+## TypeScript Example
+
+The `WCSEngine.calculate()` method is called automatically during orchestration, but you can also invoke it directly in your integration code to predict routing before making the API call.
+
+```typescript
+import { WCSEngine } from './scoring/WCSEngine';
+
+const result = WCSEngine.calculate({
+  customerId: 'cust_123',
+  email: 'user@example.com',
+  phone: null,
+  deviceId: 'dev_456',
+});
+
+// result.score    → 160
+// result.mode     → 'resolved'
+// result.transport → 'sse'
+```
+
+In this example, `customerId` contributes 100 pts, `email` adds 40 pts, and `deviceId` adds 20 pts, producing a total of 160 — well above the resolved threshold.
+
+<Note>
+  You never need to call `WCSEngine.calculate()` yourself in production. ProcureNet computes the WCS automatically when you call `POST /api/v7/orchestrate`. Pass your buyer signals in the `hints` object of the request body, and the response will include `wcs_score`, `mode`, and `transport`.
+</Note>
+
+<Tip>
+  Supplying a `customerId` alone guarantees resolved mode. At 100 points, it clears the threshold on its own — no additional signals required.
+</Tip>

@@ -1,0 +1,104 @@
+---
+title: "Orchestration Modes: Resolved, Partial, Anonymous"
+sidebarTitle: "Modes"
+description: "Explore how ProcureNet's three orchestration modes shape the checkout experience, transport protocol, and available prefill data for each session."
+---
+
+Orchestration modes define the capabilities and experience of a checkout session. ProcureNet assigns a mode to every session at creation time, derived directly from the buyer's [Wallet Confidence Score (WCS)](/concepts/wallet-confidence-score). The mode is fixed for the lifetime of that session — it determines which real-time transport protocol to use, whether prefill data is available, and how much information the buyer will need to provide manually. Choosing which signals to supply at orchestration time is therefore the most important decision you make when starting a procurement flow.
+
+## Resolved Mode (WCS ≥ 100)
+
+Resolved mode activates when ProcureNet has high confidence in the buyer's identity — typically when a `customerId` is present. This is the premium checkout experience.
+
+<CardGroup cols={2}>
+  <Card title="Transport" icon="signal-stream">
+    **Server-Sent Events (SSE)** — a lightweight, unidirectional stream that delivers session events with minimal overhead.
+  </Card>
+  <Card title="Prefill" icon="wand-magic-sparkles">
+    **Available** — call `GET /api/v7/sessions/{id}/prefill` to retrieve the customer's saved profile and payment preferences. Requires a Bearer JWT.
+  </Card>
+</CardGroup>
+
+In resolved mode, ProcureNet pre-populates checkout fields using the buyer's stored data, reducing friction to near zero for returning customers. The prefill endpoint returns structured profile and payment-preference objects that your UI can apply directly.
+
+```bash
+curl https://api.procurenet.io/api/v7/sessions/sess_abc/prefill \
+  -H "Authorization: Bearer <JWT>"
+```
+
+## Partial Mode (WCS 40–99)
+
+Partial mode activates when ProcureNet recognizes some signals — such as an email or phone number — but lacks a confirmed customer identity. The session proceeds interactively.
+
+<CardGroup cols={2}>
+  <Card title="Transport" icon="arrows-rotate">
+    **WebSocket** — a full-duplex channel that supports both sending and receiving messages, suitable for guided multi-step flows.
+  </Card>
+  <Card title="Prefill" icon="ban">
+    **Not available** — the buyer must supply any missing identity and payment information during the session.
+  </Card>
+</CardGroup>
+
+In partial mode, your UI should guide the buyer through completing their profile. Collecting a `customerId` during this flow and using it in a new session will upgrade the experience to resolved mode.
+
+## Anonymous Mode (WCS < 40)
+
+Anonymous mode activates when ProcureNet has no reliable signals about the buyer. This covers guest checkouts and first-time visitors.
+
+<CardGroup cols={2}>
+  <Card title="Transport" icon="arrows-rotate">
+    **WebSocket** — same bidirectional channel as partial mode, supporting the full interactive checkout flow.
+  </Card>
+  <Card title="Prefill" icon="ban">
+    **Not available** — the buyer completes the full checkout form from scratch, with no prior data applied.
+  </Card>
+</CardGroup>
+
+Anonymous mode imposes no restrictions on transaction completion — it simply means more manual input is required. Consider prompting buyers to create an account during or after checkout so future sessions benefit from a higher WCS.
+
+## Connecting to the Transport
+
+Once you have a `session_id` and know the `transport` from the `POST /api/v7/orchestrate` response, open the appropriate real-time connection.
+
+<Tabs>
+  <Tab title="SSE (Resolved)">
+    Server-Sent Events are native to the browser. Open the stream with `EventSource` and listen for named session events.
+
+    ```javascript
+    const source = new EventSource('/api/v7/sessions/sess_abc/stream');
+
+    source.addEventListener('state_change', (event) => {
+      const data = JSON.parse(event.data);
+      console.log('New state:', data.state);
+    });
+
+    source.addEventListener('error', () => {
+      source.close();
+    });
+    ```
+  </Tab>
+  <Tab title="WebSocket (Partial / Anonymous)">
+    WebSocket provides full-duplex communication. Use the secure `wss://` scheme in production.
+
+    ```javascript
+    const ws = new WebSocket('wss://api.procurenet.io/api/v7/sessions/sess_abc/ws');
+
+    ws.onopen = () => {
+      console.log('Session channel open');
+    };
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log('Session event:', data);
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+    ```
+  </Tab>
+</Tabs>
+
+<Tip>
+  Upgrading a session from anonymous or partial to resolved is not possible in-place. To give a buyer the resolved experience after collecting additional signals mid-flow, create a new session via `POST /api/v7/orchestrate` and pass the newly gathered signals in the `hints` object. The new session will receive the higher WCS and switch to SSE automatically.
+</Tip>

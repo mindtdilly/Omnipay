@@ -1,0 +1,135 @@
+---
+title: "GET /api/v7/sessions/{id}/prefill — Buyer Prefill Data"
+sidebarTitle: "GET /prefill"
+description: "Retrieve cached buyer profile and payment preferences for a resolved session. Only available when the session's Wallet Confidence Score is 100 or above."
+---
+
+When ProcureNet resolves a session with a Wallet Confidence Score of 100 or higher, it caches the buyer's known profile data in the local-first vector store and makes it available through the prefill endpoint. Fetching this data lets your checkout UI pre-populate name, address, and payment preference fields, reducing friction for returning buyers. If the session was classified as `partial` or `anonymous`, this endpoint returns `403` — you must present the buyer with a manual entry form instead.
+
+## Authentication
+
+<Warning>
+  This endpoint requires a valid Bearer JWT in the `Authorization` header. Requests without a token, or with an expired or malformed token, receive `401 Unauthorized`.
+</Warning>
+
+```
+Authorization: Bearer <your_jwt>
+```
+
+## Path Parameters
+
+<ParamField path="id" type="string" required>
+  The session ID returned by `POST /api/v7/orchestrate`. This scopes the prefill lookup to the correct buyer session.
+</ParamField>
+
+## Request Example
+
+```typescript
+const sessionId = 'sess_abc123';
+
+const res = await fetch(
+  `https://api.procurenet.io/api/v7/sessions/${sessionId}/prefill`,
+  {
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...',
+      'Content-Type': 'application/json'
+    }
+  }
+);
+
+const prefill = await res.json();
+// {
+//   "customer": {
+//     "name": "Jordan Reeves",
+//     "email": "buyer@example.com",
+//     "address": {
+//       "line1": "123 Main St",
+//       "city": "Austin",
+//       "state": "TX",
+//       "zip": "78701",
+//       "country": "US"
+//     }
+//   },
+//   "payment_preferences": ["usdc", "card"]
+// }
+```
+
+## Response Fields
+
+<ResponseField name="customer" type="object" required>
+  A profile object containing the buyer's known identity fields. The exact shape depends on what was available when ProcureNet built the WCS profile.
+
+  <Expandable title="customer fields">
+    <ResponseField name="customer.name" type="string">
+      The buyer's full name as stored in the resolved profile.
+    </ResponseField>
+
+    <ResponseField name="customer.email" type="string">
+      The buyer's email address.
+    </ResponseField>
+
+    <ResponseField name="customer.address" type="object">
+      Structured shipping or billing address, when available.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="payment_preferences" type="string[]" required>
+  An ordered list of the buyer's preferred payment methods, from most to least preferred. Possible values include `"usdc"`, `"card"`, and `"bank_transfer"`. Use this list to rank the options you present in your funding-method UI.
+</ResponseField>
+
+## Response Example
+
+```json
+{
+  "customer": {
+    "name": "Jordan Reeves",
+    "email": "buyer@example.com",
+    "address": {
+      "line1": "123 Main St",
+      "city": "Austin",
+      "state": "TX",
+      "zip": "78701",
+      "country": "US"
+    }
+  },
+  "payment_preferences": ["usdc", "card"]
+}
+```
+
+<Tip>
+  Use `payment_preferences[0]` as the default selection in your funding-method UI, then pass it to `POST /api/v7/sessions/{id}/funding-method` when the buyer confirms.
+</Tip>
+
+## Eligibility Check
+
+Before calling this endpoint, inspect the `mode` field from your `POST /api/v7/orchestrate` response:
+
+<Tabs>
+  <Tab title="Eligible — resolved">
+    ```typescript
+    if (session.mode === 'resolved') {
+      const prefill = await fetchPrefill(session.session_id, jwt);
+      populateCheckoutForm(prefill);
+    }
+    ```
+  </Tab>
+  <Tab title="Not eligible — partial / anonymous">
+    ```typescript
+    if (session.mode !== 'resolved') {
+      // Skip prefill — render manual entry form
+      renderManualEntryForm();
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Error Codes
+
+| HTTP Status | Description |
+|---|---|
+| `401 Unauthorized` | Missing, expired, or invalid Bearer JWT. |
+| `403 Forbidden` | The session's WCS is below 100 (`partial` or `anonymous` mode). Prefill is not available for this session. |
+| `404 Not Found` | No session exists for the provided `id`. |
+| `500 Internal Server Error` | Vector store lookup failure. Retry the request. |

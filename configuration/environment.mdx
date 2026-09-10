@@ -1,0 +1,128 @@
+---
+title: "Configure ProcureNet for Your Environment"
+sidebarTitle: "Environment"
+description: "Set up your API credentials, choose an EVM payment network, and tune the VCI bridge — everything you need to connect your app to ProcureNet."
+---
+
+ProcureNet exposes a set of configuration options you control through your account settings and API keys. This page covers the **customer-configurable** settings only — what you pass in API calls and set in your application. You will not need to touch any infrastructure; every option described here is a value you supply at initialization time or as an HTTP header.
+
+## API Credentials
+
+ProcureNet uses four distinct credentials, each scoped to a specific surface. Keep them in separate environment variables and never commit them to source control.
+
+<CardGroup cols={2}>
+  <Card title="Wallet API Key" icon="key">
+    Passed as the `x-perplexity-mod-key` header on all wallet and payment
+    endpoints. Obtain this from the **API Keys** section of your ProcureNet
+    dashboard.
+  </Card>
+  <Card title="JWT Bearer Token" icon="lock">
+    Passed as `Authorization: Bearer <token>` on session endpoints. Generated
+    when you authenticate your account via ProcureNet's auth flow.
+  </Card>
+  <Card title="Webhook Secret" icon="webhook">
+    Used to verify the `x-procure-signature` HMAC on inbound Procurement
+    Express callbacks. Copy it from the **Webhooks** tab in your dashboard.
+  </Card>
+  <Card title="Admin Key" icon="shield">
+    Passed as `x-admin-key` when triggering manual payment confirmation.
+    Keep this completely separate from your regular API key and restrict
+    its use to server-side code only.
+  </Card>
+</CardGroup>
+
+<Tip>
+  Store all four credentials as environment variables (e.g., `PROCURENET_API_KEY`, `PROCURENET_JWT`, `PROCURENET_WEBHOOK_SECRET`, `PROCURENET_ADMIN_KEY`). Reference them at runtime — never hard-code credential strings in your source files.
+</Tip>
+
+<Warning>
+  The admin key (`x-admin-key`) carries elevated privileges that can override payment confirmation. Restrict it to server-side processes only and rotate it immediately if it is ever exposed.
+</Warning>
+
+---
+
+## Payment Networks
+
+Every USDC payment request targets a specific EVM network. You choose the network per request by passing the `network` field in your payment payload.
+
+| Network     | When to use                                              |
+| ----------- | -------------------------------------------------------- |
+| `base`      | Recommended default — lowest transaction fees            |
+| `arbitrum`  | Low fees with broad DeFi ecosystem support               |
+| `polygon`   | Established network with wide wallet compatibility       |
+| `ethereum`  | Maximum compatibility when recipients require mainnet    |
+
+<Info>
+  Use `base` for the majority of field evaluator payouts to minimize on-chain costs. Switch to `ethereum` only when a recipient's wallet does not support Layer 2 networks.
+</Info>
+
+---
+
+## VCI Bridge Configuration
+
+The `VCIProcureNetBridge` connects your offline VCI evaluation queue to ProcureNet's USDC wallet. You configure its behavior through two options passed to `ProcureNetWalletClient`.
+
+<ParamField body="autoWatch" type="boolean" default="true">
+  When `true`, the bridge automatically polls for on-chain confirmation after
+  creating a payment request — no extra calls needed from your side. Set to
+  `false` if you want to control the confirmation check yourself by calling
+  `manualConfirmPayment()` explicitly.
+</ParamField>
+
+<ParamField body="tenantIdResolver" type="() => string" default="() => 'default-tenant'">
+  A function you provide that returns your tenant ID string. The bridge calls
+  this resolver each time it creates a payment, so you can return a dynamic
+  value (e.g., from your session context) if you operate multiple tenants.
+</ParamField>
+
+### Initialization example
+
+Pass your base URL and API key to `ProcureNetWalletClient`, then hand the client to `VCIProcureNetBridge` alongside your queue adapter and tenant resolver.
+
+<CodeGroup>
+
+```typescript TypeScript
+import {
+  ProcureNetWalletClient,
+  VCIProcureNetBridge,
+} from '@procurenet/vci-bridge';
+
+const wallet = new ProcureNetWalletClient(
+  'https://api.procurenet.io',    // base URL
+  process.env.PROCURENET_API_KEY!, // x-perplexity-mod-key
+  { autoWatch: true }              // watch for on-chain confirmation automatically
+);
+
+const bridge = new VCIProcureNetBridge(
+  myQueueAdapter,                  // your QueueLike implementation
+  wallet,
+  () => process.env.TENANT_ID!     // tenantIdResolver
+);
+```
+
+```typescript Manual confirmation (autoWatch: false)
+import {
+  ProcureNetWalletClient,
+  VCIProcureNetBridge,
+} from '@procurenet/vci-bridge';
+
+const wallet = new ProcureNetWalletClient(
+  'https://api.procurenet.io',
+  process.env.PROCURENET_API_KEY!,
+  { autoWatch: false }             // you will call manualConfirmPayment() yourself
+);
+
+const bridge = new VCIProcureNetBridge(myQueueAdapter, wallet);
+
+// Later, after the evaluator submits offline data:
+const result = await bridge.manualConfirmPayment(
+  localEvaluationId,
+  process.env.PROCURENET_ADMIN_KEY!
+);
+
+if (result.confirmed) {
+  console.log('Payment confirmed on-chain:', result.transaction_hash);
+}
+```
+
+</CodeGroup>

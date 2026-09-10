@@ -1,0 +1,99 @@
+---
+title: "OpenClaw AI Agent Swarm Configuration Guide"
+sidebarTitle: "AI Agents"
+description: "Learn how ProcureNet's OpenClaw worker fleet handles security, reliability, and observability automatically — and what that means for your integration."
+---
+
+ProcureNet's OpenClaw agent swarm runs a fleet of specialized AI workers that handle security, data reliability, observability, and procurement automation. These agents operate continuously in the background on your behalf — you do not invoke them directly or manage their lifecycle. Instead, you configure their behavior through settings in your integration and interpret the signals they surface, such as trace IDs and webhook retry outcomes.
+
+## Key Worker Classes
+
+OpenClaw currently runs 10+ worker classes. The three below have the most direct impact on your day-to-day integration.
+
+<CardGroup cols={3}>
+  <Card title="claw-v1 — Security" icon="shield-halved">
+    Verifies every inbound webhook signature using HMAC validation. When
+    `claw-v1` rejects a delivery, ProcureNet returns a `401` before your
+    application code ever sees the payload — protecting you from forged
+    callbacks.
+  </Card>
+  <Card title="claw-v3 — Reliability" icon="database">
+    Manages session state persistence to durable storage. If your server
+    restarts mid-session, `claw-v3` ensures the session is recoverable and
+    state transitions can resume exactly where they left off.
+  </Card>
+  <Card title="claw-v10 — Diagnostics" icon="magnifying-glass-chart">
+    Emits structured logs and attaches a traceable ID to every session event
+    and payment flow. You surface this ID via the `x-trace-id` response header
+    to correlate incidents when contacting support.
+  </Card>
+</CardGroup>
+
+---
+
+## How Agents Affect Your Integration
+
+<Steps>
+  <Step title="Webhook delivery retries are automatic">
+    If ProcureNet cannot reach your webhook endpoint, the agent swarm queues
+    the delivery for retry using exponential back-off. You do not need to
+    implement your own retry logic for missed callbacks — just ensure your
+    endpoint is idempotent by checking the `payment_id` or `session_id`
+    before processing duplicate deliveries.
+  </Step>
+  <Step title="Sessions survive server restarts">
+    Because `claw-v3` persists state externally, a session that was in-flight
+    when your server went down is still valid when it comes back up. Resume it
+    by calling `POST /api/v7/sessions/{id}/transition` with the same session ID
+    — the state machine picks up from its last confirmed position.
+  </Step>
+  <Step title="Payment failures are traceable">
+    When a USDC payment confirmation fails, `claw-v10` records the failure with
+    a unique trace ID attached to the `x-trace-id` header on the originating
+    API response. Log that header value and include it in any support ticket —
+    it lets the ProcureNet team locate the exact event in the diagnostics
+    pipeline without requiring you to reproduce the failure.
+  </Step>
+</Steps>
+
+---
+
+## Frequently Asked Questions
+
+<Accordion title="Can I configure which agents run?">
+  No. The OpenClaw agent swarm is fully managed by ProcureNet and runs
+  automatically for every account. There is no option to enable or disable
+  individual workers. All 10+ worker classes are active on your sessions from
+  the moment you create them.
+</Accordion>
+
+<Accordion title="How do I know if an agent is failing?">
+  Check the `x-trace-id` response header on API calls. Every response from a
+  ProcureNet session or payment endpoint includes this header. If you observe
+  unexpected behavior — stale state, missed webhook deliveries, unconfirmed
+  payments — record the trace ID from the relevant response and include it when
+  you contact ProcureNet support. The diagnostics team can use it to pinpoint
+  exactly which worker encountered an error and when.
+</Accordion>
+
+<Accordion title="Are agent skills updated automatically?">
+  Yes. ProcureNet deploys agent skill updates as part of regular platform
+  releases. New capabilities are added to the 48-skill manifest without
+  changing any public API contract, so your integration does not need to be
+  modified when updates ship. You will see improvements in accuracy and
+  coverage automatically.
+</Accordion>
+
+<Accordion title="What happens if an agent is temporarily unavailable?">
+  ProcureNet is designed for agent-level fault tolerance. If a single worker
+  is unavailable, in-flight sessions remain intact because `claw-v3` has
+  already persisted their state. Webhook retries continue to queue. You may
+  notice slightly elevated latency on affected operations, which resolves once
+  the worker recovers. No manual intervention is required on your side.
+</Accordion>
+
+---
+
+<Note>
+  OpenClaw currently runs 10+ worker classes with a 48-skill manifest planned. New skills are deployed transparently — your integration code does not need to change to benefit from expanded agent capabilities as they roll out.
+</Note>

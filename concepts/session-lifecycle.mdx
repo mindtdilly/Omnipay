@@ -1,0 +1,105 @@
+---
+title: "ProcureNet Session Lifecycle and State Machine"
+sidebarTitle: "Session Lifecycle"
+description: "Understand how ProcureNet sessions progress through states from creation to completion, and how to drive each transition correctly."
+---
+
+Sessions are the core unit of a ProcureNet procurement flow. Every buyer interaction — from the moment checkout begins to the final payment confirmation — is tracked inside a single session object. Each session moves through a well-defined state machine: states advance in a fixed order, illegal transitions are rejected with deterministic error codes, and every successful transition emits a real-time event over the session's transport channel. Understanding the lifecycle helps you build reliable integrations that handle retries, timeouts, and escrow correctly.
+
+## Session States
+
+A session passes through the following states in order. Not every session visits every state — the `escrow_pending` state only applies to high-value transactions.
+
+<CardGroup cols={2}>
+  <Card title="created" icon="circle-plus">
+    The session has been initialized by `POST /api/v7/orchestrate`. The WCS score, mode, and transport have been assigned. No payment data has been provided yet.
+  </Card>
+  <Card title="active" icon="circle-play">
+    The buyer's transport connection has been established (SSE or WebSocket). The session is live and accepting input.
+  </Card>
+  <Card title="funded" icon="circle-dollar-sign">
+    A funding method has been successfully set via `POST /api/v7/sessions/{id}/funding-method`. The session is ready to proceed to completion or escrow.
+  </Card>
+  <Card title="escrow_pending" icon="lock">
+    For high-value transactions only. Escrow has been initiated and is awaiting acceptance via `POST /api/v7/sessions/{id}/escrow-accept`.
+  </Card>
+  <Card title="completed" icon="circle-check">
+    The procurement flow finished successfully. The session is now immutable.
+  </Card>
+  <Card title="cancelled" icon="circle-xmark">
+    The session was cancelled before completion. No charges were processed.
+  </Card>
+</CardGroup>
+
+<Note>
+  Illegal state transitions — such as attempting to accept escrow on a session that is not yet funded — are rejected synchronously with a deterministic error code in the response body. Build your integration to check for these codes rather than relying on HTTP status alone.
+</Note>
+
+## Driving a Session Through Its Lifecycle
+
+Follow these steps to move a session from creation to completion.
+
+<Steps>
+  <Step title="Create the session">
+    Call `POST /api/v7/orchestrate` with your buyer signals in the `hints` object. The response returns a `session_id`, `wcs_score`, `mode`, and `transport`. Store the `session_id` — every subsequent call requires it.
+
+    ```bash
+    curl -X POST https://api.procurenet.io/api/v7/orchestrate \
+      -H "Authorization: Bearer <JWT>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "hints": {
+          "customerId": "cust_123",
+          "email": "buyer@example.com"
+        }
+      }'
+    ```
+  </Step>
+
+  <Step title="Connect to the real-time transport">
+    Use the `transport` value from the response to open the correct channel. Resolved sessions use SSE; partial and anonymous sessions use WebSocket. See [Orchestration Modes](/concepts/orchestration-modes) for connection examples.
+  </Step>
+
+  <Step title="Set the funding method">
+    Call `POST /api/v7/sessions/{id}/funding-method` with the buyer's chosen payment method. This advances the session from `active` to `funded`.
+
+    ```bash
+    curl -X POST https://api.procurenet.io/api/v7/sessions/sess_abc/funding-method \
+      -H "Authorization: Bearer <JWT>" \
+      -H "Content-Type: application/json" \
+      -d '{ "method": "usdc", "network": "base" }'
+    ```
+  </Step>
+
+  <Step title="Accept escrow (high-value transactions only)">
+    If the transaction value exceeds the escrow threshold, the session enters `escrow_pending`. Call `POST /api/v7/sessions/{id}/escrow-accept` to acknowledge the escrow terms and advance the session.
+
+    ```bash
+    curl -X POST https://api.procurenet.io/api/v7/sessions/sess_abc/escrow-accept \
+      -H "Authorization: Bearer <JWT>"
+    ```
+  </Step>
+
+  <Step title="Advance to completion">
+    Call `POST /api/v7/sessions/{id}/transition` to move the session toward `completed`. You may need to call this endpoint more than once if your flow has intermediate steps — each call advances the state machine by one step.
+
+    ```bash
+    curl -X POST https://api.procurenet.io/api/v7/sessions/sess_abc/transition \
+      -H "Authorization: Bearer <JWT>" \
+      -H "Content-Type: application/json" \
+      -d '{ "action": "confirm" }'
+    ```
+  </Step>
+</Steps>
+
+## Session Expiry
+
+Sessions have a finite lifetime. If a session expires before you complete all transitions, any further API calls against that session ID return **410 Gone**. When you receive a 410, you must create a new session from scratch — expired sessions cannot be resumed or extended.
+
+<Warning>
+  Do not cache session IDs across user visits or browser reloads without validating that the session is still active. Always check for 410 responses and handle them by restarting orchestration.
+</Warning>
+
+<Tip>
+  Every state transition emits an event over the session's transport channel. Subscribe to these events in your UI to drive real-time progress indicators without polling the API.
+</Tip>

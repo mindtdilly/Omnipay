@@ -1,0 +1,221 @@
+---
+title: "POST /webhooks/procurement — Approval Callback"
+sidebarTitle: "POST /webhooks"
+description: "Handle signed Procurement Express approval webhooks. Approved decisions resume sessions; rejected ones terminate them. Always verify the HMAC signature."
+---
+
+ProcureNet sends a signed POST request to your webhook URL whenever a Procurement Express approval decision is made. Your handler receives a payload containing a `session_id`, a `decision` of either `approved` or `rejected`, the `actor` who made the decision, and an optional `reason`. Before acting on the payload, you must verify the `x-procure-signature` header using your shared webhook secret — requests that fail signature verification must be rejected to prevent spoofed approvals from influencing live procurement sessions. Return HTTP `204` on success; ProcureNet will retry on any non-`2xx` response.
+
+## Endpoint
+
+```http
+POST /webhooks/procurement
+```
+
+## Authentication
+
+ProcureNet signs each outbound webhook request with an HMAC-SHA256 signature derived from your shared secret and the raw request body. The signature arrives in the `x-procure-signature` header in the format:
+
+```text
+x-procure-signature: sha256=<hex_digest>
+```
+
+Your handler must recompute the expected signature and compare it to the header value **before** parsing or acting on the payload.
+
+<Warning>
+  Always parse the request body using `express.raw()` (or equivalent raw body middleware) **before** performing signature verification. If you parse the body as JSON first, the serialization may differ from what ProcureNet signed, causing every verification to fail regardless of key validity.
+</Warning>
+
+## Signature Verification
+
+<Steps>
+  <Step title="Receive the raw request body">
+    Configure your route to buffer the raw bytes of the request body. In Express, use `express.raw({ type: 'application/json' })` on the webhook route — do not apply `express.json()` globally before this route.
+  </Step>
+  <Step title="Read the x-procure-signature header">
+    Extract the `x-procure-signature` header from the incoming request. If the header is absent, reject the request immediately with `401`.
+  </Step>
+  <Step title="Recompute the expected signature">
+    Use HMAC-SHA256 with your `WEBHOOK_SECRET` and the raw request body buffer to compute the expected digest. Prepend `sha256=` to match the header format.
+  </Step>
+  <Step title="Compare signatures">
+    Compare the computed signature to the header value. Use a constant-time comparison where possible to avoid timing attacks. Reject with `401` on mismatch.
+  </Step>
+  <Step title="Parse and handle the payload">
+    Parse the raw body as JSON only after verification passes. Act on the `decision` field and return `204`.
+  </Step>
+</Steps>
+
+## Code Example
+
+<CodeGroup>
+```typescript Express (TypeScript)
+import express from 'express';
+import { createHmac } from 'crypto';
+
+const app = express();
+
+app.post(
+  '/webhooks/procurement',
+  express.raw({ type: 'application/json' }),
+  (req, res) => {
+    const signature = req.headers['x-procure-signature'] as string;
+
+    if (!signature) {
+      return res.status(401).send('Missing signature');
+    }
+
+    const expected =
+      'sha256=' +
+      createHmac('sha256', process.env.WEBHOOK_SECRET!)
+        .update(req.body)
+        .digest('hex');
+
+    if (signature !== expected) {
+      return res.status(401).send('Invalid signature');
+    }
+
+    const payload = JSON.parse(req.body.toString()) as {
+      session_id: string;
+      decision: 'approved' | 'rejected';
+      actor: string;
+      reason?: string;
+    };
+
+    if (payload.decision === 'approved') {
+      // Resume the suspended orchestration flow for this session
+      console.log(`Session ${payload.session_id} approved by ${payload.actor}`);
+    } else {
+      // Terminate the session
+      console.log(`Session ${payload.session_id} rejected: ${payload.reason ?? 'no reason given'}`);
+    }
+
+    return res.status(204).send();
+  }
+);
+```
+
+```typescript Next.js API Route
+import { createHmac } from 'crypto';
+import type { NextApiRequest, NextApiResponse } from 'next';
+
+export const config = {
+  api: { bodyParser: false },
+};
+
+async function getRawBody(req: NextApiRequest): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', chunk => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).end();
+  }
+
+  const rawBody = await getRawBody(req);
+  const signature = req.headers['x-procure-signature'] as string;
+  const expected =
+    'sha256=' +
+    createHmac('sha256', process.env.WEBHOOK_SECRET!)
+      .update(rawBody)
+      .digest('hex');
+
+  if (signature !== expected) {
+    return res.status(401).json({ error: 'Invalid signature' });
+  }
+
+  const payload = JSON.parse(rawBody.toString());
+
+  // Handle approved / rejected
+  if (payload.decision === 'approved') {
+    await resumeSession(payload.session_id);
+  } else {
+    await terminateSession(payload.session_id, payload.reason);
+  }
+
+  return res.status(204).end();
+}
+```
+</CodeGroup>
+
+## Payload Fields
+
+<ParamField body="session_id" type="string" required>
+  The ProcureNet session ID that this approval decision applies to. Use this to look up the suspended session in your orchestration state.
+</ParamField>
+
+<ParamField body="decision" type="string" required>
+  The approval outcome. One of:
+  - `"approved"` — the session should be resumed and the procurement flow continued.
+  - `"rejected"` — the session should be terminated and any reserved resources released.
+</ParamField>
+
+<ParamField body="actor" type="string" required>
+  The identity of the person or system that made the approval decision. This value is provided by Procurement Express and may be an email address, username, or system identifier depending on your Procurement Express configuration.
+</ParamField>
+
+<ParamField body="reason" type="string">
+  An optional human-readable explanation for the decision. This is most commonly populated for `rejected` decisions to explain why a session was not approved. Log this value for auditing purposes.
+</ParamField>
+
+### Example Payload — Approved
+
+```json
+{
+  "session_id": "sess_a1b2c3d4",
+  "decision": "approved",
+  "actor": "procurement-manager@example.com",
+  "reason": "Budget confirmed for Q3 vendor onboarding"
+}
+```
+
+### Example Payload — Rejected
+
+```json
+{
+  "session_id": "sess_e5f6g7h8",
+  "decision": "rejected",
+  "actor": "compliance-bot",
+  "reason": "Vendor not on approved supplier list"
+}
+```
+
+## Response
+
+Return HTTP `204 No Content` to acknowledge the webhook. Do not return a body.
+
+| Status | Meaning |
+|---|---|
+| `204` | Webhook received and processed successfully |
+| `401` | Signature verification failed — request rejected |
+
+<Note>
+  ProcureNet retries webhook delivery on any non-`2xx` response using an exponential back-off policy. Make your handler idempotent — the same `session_id` + `decision` combination may arrive more than once. Check whether the session is already in its target state before applying side effects.
+</Note>
+
+## Decision Handling
+
+<CardGroup cols={2}>
+  <Card title="approved" icon="circle-check">
+    Resume the suspended orchestration flow. The session re-enters the state machine at the point it was paused. You may want to call `POST /api/v7/sessions/{id}/transition` to advance to the next state after resuming.
+  </Card>
+  <Card title="rejected" icon="circle-xmark">
+    Terminate the session immediately. Release any held inventory or funding reservations, notify the buyer, and close the session. Log the `actor` and `reason` fields for your audit trail.
+  </Card>
+</CardGroup>
+
+## Security Checklist
+
+<Accordion title="Webhook security best practices">
+  - **Never skip signature verification.** Even in development, always verify the `x-procure-signature` header.
+  - **Use a raw body parser.** Applying a JSON parser before verification will invalidate the HMAC check.
+  - **Store `WEBHOOK_SECRET` securely.** Treat this secret like a private key — use environment variables or a secrets manager, never hardcode it.
+  - **Make handlers idempotent.** ProcureNet may deliver the same event more than once. Guard against double-processing by checking current session state before applying transitions.
+  - **Respond promptly.** Complete signature verification and enqueue any heavy work asynchronously. Return `204` within a few seconds to avoid triggering ProcureNet's retry logic.
+  - **Log all decisions.** Store the full payload, `actor`, and timestamp for each webhook received. Approval decisions are auditable events.
+</Accordion>

@@ -1,0 +1,123 @@
+---
+title: "Automate Field Evaluator Payments with VCI Bridge"
+sidebarTitle: "Field Payments"
+description: "Automatically pay field evaluators in USDC when their offline assessments sync — no manual intervention required for eligible score tiers."
+---
+
+ProcureNet's VCI bridge connects your offline field evaluation queue directly to the USDC payment infrastructure. When a field evaluator completes assessments without connectivity and later comes back online, the bridge intercepts the sync event, calculates the appropriate USDC payout based on the evaluator's average score, creates a payment request, and fires a wallet event your UI can listen to. You handle the UI feedback; ProcureNet handles the on-chain settlement.
+
+## How the Payment Flow Works
+
+<Steps>
+
+### Evaluator Completes Assessments Offline
+
+Field evaluators submit assessments through your app while disconnected. These records are queued locally on the device until connectivity is restored.
+
+### Evaluation Queue Syncs on Reconnect
+
+When the device comes back online, the evaluation queue syncs and fires a `vci-sync-status` browser event. This is the trigger that kicks off the automated payment flow.
+
+### VCIProcureNetBridge Calculates the Payout
+
+The bridge intercepts `vci-sync-status`, reads the evaluator's average score across all synced assessments, and maps that score to a USDC payout tier.
+
+| Avg Evaluation Score | USDC Payout |
+|---|---|
+| ≥ 9.0 | 500 USDC |
+| ≥ 7.0 | 250 USDC |
+| ≥ 5.0 | 100 USDC |
+| < 5.0 | 0 USDC (no payment) |
+
+### Payment Request Is Created and Attached
+
+The bridge calls `POST /mods/procurement_wallet/usdc/request` to create a USDC payment request on the configured network. The response includes a `deposit_address` and an optional `qr_code`. Both are attached to the evaluation record for traceability.
+
+GPS metadata captured by the field device — latitude, longitude, accuracy, and timestamp — is automatically included in the payment request metadata, creating a location-stamped audit record.
+
+### `vci-wallet-sync` Event Fires
+
+Once the payment request is created, the bridge dispatches a `vci-wallet-sync` browser event containing the payment details. Your UI can listen for this event to show confirmation feedback to the evaluator.
+
+### ProcureNet Watches for On-Chain Confirmation
+
+If you instantiate the bridge with `autoWatch: true`, ProcureNet polls `GET /mods/procurement_wallet/usdc/watch/{paymentId}` automatically and resolves the payment once the transaction is confirmed on-chain. If `autoWatch` is false, you trigger confirmation manually.
+
+</Steps>
+
+## Setting Up the Bridge
+
+Instantiate `ProcureNetWalletClient` with your API key and bridge configuration, then pass it to `VCIProcureNetBridge` along with your evaluation queue and a tenant resolver function.
+
+```typescript
+import { VCIProcureNetBridge, ProcureNetWalletClient } from './integrations/VCIProcureNetBridge';
+
+const wallet = new ProcureNetWalletClient(
+  'https://api.procurenet.io',
+  process.env.PROCURENET_API_KEY!,
+  { autoWatch: true }
+);
+
+const bridge = new VCIProcureNetBridge(queue, wallet, () => 'tenant_abc');
+```
+
+<Note>
+  The `x-perplexity-mod-key` header is set automatically from the API key you pass to `ProcureNetWalletClient`. You do not need to attach it manually to wallet endpoint calls.
+</Note>
+
+## Supported Networks
+
+ProcureNet's USDC bridge supports the following networks. Specify the target network when configuring your wallet client:
+
+<CardGroup cols={2}>
+  <Card title="Base" icon="circle-b">
+    Low-fee L2 — recommended for high-volume field payment operations.
+  </Card>
+  <Card title="Arbitrum" icon="circle-a">
+    High-throughput L2 with strong DeFi ecosystem support.
+  </Card>
+  <Card title="Polygon" icon="hexagon">
+    Fast finality and broad wallet compatibility for field devices.
+  </Card>
+  <Card title="Ethereum" icon="ethereum">
+    Mainnet settlement for maximum finality guarantees on high-value payments.
+  </Card>
+</CardGroup>
+
+## Listening for Payment Events
+
+Register a `vci-wallet-sync` listener in your frontend to surface payment confirmation details to the evaluator as soon as the payment request is created.
+
+```typescript
+window.addEventListener('vci-wallet-sync', (event) => {
+  const { paymentId, amount, qrCode, expiresAt } = (event as CustomEvent).detail;
+  console.log(`Payment ${paymentId} created for ${amount} USDC`);
+  // Render qrCode and expiresAt in your UI for the evaluator to track
+});
+```
+
+## Manual Confirmation
+
+If you instantiate the bridge with `autoWatch: false`, you are responsible for triggering on-chain confirmation. Call `manualConfirmPayment` with the local evaluation record ID and your admin key.
+
+```typescript
+const result = await bridge.manualConfirmPayment(localId, adminKey);
+
+if (result.confirmed) {
+  console.log('Transaction hash:', result.transaction_hash);
+}
+```
+
+<Tip>
+  Use `autoWatch: true` for production deployments unless you have a specific reason to gate confirmation — it eliminates the need for a manual confirmation step and reduces payment latency.
+</Tip>
+
+## GPS Metadata Attachment
+
+<Info>
+  Location metadata is attached automatically. If the field device has GPS enabled, the bridge reads `lat`, `lng`, `accuracy`, and `timestamp` from the device context and includes them in the payment request metadata sent to ProcureNet. No additional configuration is required.
+</Info>
+
+<Warning>
+  Evaluations with an average score below 5.0 receive no USDC payment. Verify your scoring rubrics and calibration against this threshold before deploying the bridge to production — evaluators below the floor will not receive a payout regardless of submission volume.
+</Warning>

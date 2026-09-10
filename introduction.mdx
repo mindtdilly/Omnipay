@@ -1,0 +1,58 @@
+---
+title: "ProcureNet: AI-Powered Procurement Orchestration Platform"
+sidebarTitle: "Introduction"
+description: "ProcureNet orchestrates checkout sessions with real-time buyer scoring, AI agent automation, and on-chain USDC payments for field evaluators."
+---
+
+ProcureNet is an AI-powered procurement and checkout orchestration platform that brings together real-time buyer identity scoring, stateful session management, on-chain payment settlement, and a swarm of intelligent procurement agents — all through a unified API. Whether you're embedding a checkout flow into your storefront, automating supplier procurement, or paying field evaluators for completed work, ProcureNet gives you a single surface to coordinate the entire journey.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Make your first orchestration call and connect to a live session stream in minutes.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/authentication">
+    Learn how API keys, JWT tokens, webhook signatures, and admin keys work together.
+  </Card>
+  <Card title="Core Concepts" icon="layer-group" href="/concepts">
+    Understand WCS scoring, session state machines, and transport selection.
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/orchestrate">
+    Full reference for every v7 endpoint, request schema, and response shape.
+  </Card>
+</CardGroup>
+
+## What ProcureNet Does
+
+ProcureNet handles four distinct areas of procurement orchestration:
+
+**Wallet Confidence Score (WCS) Engine** — Every session begins with a WCS calculation. You pass identity hints (customer ID, email, phone, device ID) when you start a session, and the engine scores the buyer's resolvability from 0 to 200. That score determines the session mode and the real-time transport ProcureNet assigns.
+
+**Stateful Session API (v7)** — Sessions progress through a well-defined state machine. You start orchestration, retrieve prefill data for known buyers, set a funding method, accept escrow for high-value transactions, and advance the state via explicit transition calls. Every state change is observable.
+
+**USDC Payment Bridge** — Field evaluators who complete offline evaluations receive on-chain USDC payments when their work syncs. The bridge calculates payout tier from average evaluation scores and settles directly to a deposit address on your chosen network (Base, Arbitrum, Polygon, or Ethereum).
+
+**OpenClaw AI Agent Swarm** — A swarm of 10+ AI workers runs procurement intelligence tasks in the background: sourcing suppliers, validating contract rules, resolving entitlements, and enriching session context from the local-first vector store.
+
+## Session Modes
+
+The WCS score your session receives determines which mode — and which real-time transport — ProcureNet assigns. Understanding these modes helps you build the right client-side connection logic.
+
+<CardGroup cols={3}>
+  <Card title="Resolved" icon="circle-check">
+    **Score ≥ 100** — The buyer's identity is fully established (typically a known customer ID plus at least one contact signal). ProcureNet assigns SSE transport and enables prefill data retrieval so you can pre-populate checkout fields automatically.
+  </Card>
+  <Card title="Partial" icon="circle-half-stroke">
+    **Score 40–99** — The buyer is partially identified, for example by email or phone but without a matched customer ID. ProcureNet assigns WebSocket transport. Prefill is not available, but the session remains stateful and can be upgraded if identity resolves later.
+  </Card>
+  <Card title="Anonymous" icon="circle-xmark">
+    **Score &lt; 40** — No strong identity signals are present. ProcureNet assigns WebSocket transport. The session is still fully orchestrated, but buyer-specific features like prefill and escrow auto-accept are unavailable until identity is established.
+  </Card>
+</CardGroup>
+
+<Note>
+  Your session mode is determined at the moment you call `POST /api/v7/orchestrate`. If your buyer's identity context changes mid-session (for example, they log in), start a new orchestration call with updated hints to re-score and potentially upgrade to a higher mode.
+</Note>
+
+## The Local-First Vector Store
+
+ProcureNet's OpenClaw swarm operates against a local-first vector store that holds four index types: **WCS profiles** for scoring history, **contract rules** for procurement validation, **translations** for i18n content, and **entitlements** for authorization. This store runs on-device, keeping latency low and allowing the swarm to operate even during intermittent connectivity — crucial for field evaluation workflows.

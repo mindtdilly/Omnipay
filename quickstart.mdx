@@ -1,47 +1,213 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with ProcureNet Orchestration API Fast"
+sidebarTitle: "Quickstart"
+description: "Start a WCS-scored procurement session, connect to the real-time stream, and advance your first state machine transition in under 10 minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This guide walks you through the fastest path to a working ProcureNet integration. You'll obtain your API key, start a scored orchestration session, connect to the session's real-time stream, and fire your first state transition — all with TypeScript examples you can run directly against the API. By the end, you'll have a live session flowing through ProcureNet's v7 orchestration pipeline.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
-    ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+  <Step title="Obtain your API key">
+    ProcureNet uses separate credentials for different parts of the API. For session orchestration you need a **JWT token** (covered in [Authentication](/authentication)), but to call wallet and payment endpoints you'll need a **mod key**.
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+    Request your API key from the ProcureNet dashboard or your account team. Once issued, you'll use it as the `x-perplexity-mod-key` header on all wallet and payment requests.
 
-    ```bash
-    your-cli start
+    Store your key in an environment variable and never hard-code it in client-side code:
+
+    ```typescript
+    // .env
+    PROCURENET_MOD_KEY=your_mod_key_here
+    PROCURENET_JWT=your_jwt_token_here
+    PROCURENET_BASE_URL=https://api.procurenet.io
     ```
+
+    <Warning>
+      Never expose your `x-perplexity-mod-key` or JWT in browser-side JavaScript or public repositories. These credentials carry full API access for their respective scopes.
+    </Warning>
   </Step>
+
+  <Step title="Start an orchestration session">
+    Call `POST /api/v7/orchestrate` to create a session. Pass identity hints for the buyer — the more signals you provide, the higher the Wallet Confidence Score (WCS) and the richer the session capabilities you'll unlock.
+
+    The `hints` object accepts any combination of `customerId`, `email`, `phone`, and `deviceId`. Each contributes to the WCS score:
+    - `customerId` — 100 points
+    - `email` — 40 points
+    - `phone` — 40 points
+    - `deviceId` — 20 points (max total: 200)
+
+    ```typescript
+    const response = await fetch(
+      `${process.env.PROCURENET_BASE_URL}/api/v7/orchestrate`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.PROCURENET_JWT}`,
+        },
+        body: JSON.stringify({
+          amount: 1250.00,
+          currency: "USD",
+          hints: {
+            customerId: "cust_01HXYZ9ABC",
+            email: "buyer@example.com",
+            phone: "+14155552671",
+            deviceId: "dev_fingerprint_abc123",
+          },
+        }),
+      }
+    );
+
+    const session = await response.json();
+    console.log(session);
+    ```
+
+    A successful response returns the session identifier, the calculated WCS score, the resolved mode, and the transport type to use for your real-time connection:
+
+    ```json
+    {
+      "session_id": "sess_01JKAB3MXPQ7RVTZWN5",
+      "wcs_score": 200,
+      "mode": "resolved",
+      "transport": "sse"
+    }
+    ```
+
+    Use the `mode` and `transport` fields together to decide how to connect in the next step.
+
+    <Tip>
+      A `wcs_score` of 200 means all four identity hints were present and valid. A score ≥ 100 puts the session in `resolved` mode and unlocks prefill data retrieval via `GET /api/v7/sessions/{id}/prefill`.
+    </Tip>
+  </Step>
+
+  <Step title="Connect to the session stream">
+    ProcureNet pushes real-time session events over either SSE or WebSocket depending on the `transport` value in your orchestration response. Open the appropriate connection immediately after starting the session.
+
+    <Tabs>
+      <Tab title="SSE (resolved sessions)">
+        Use SSE when `transport` is `"sse"` — this applies to all sessions with a WCS score ≥ 100.
+
+        ```typescript
+        // Connect to SSE stream for resolved sessions
+        const sessionId = session.session_id;
+        const streamUrl = `${process.env.PROCURENET_BASE_URL}/api/v7/sessions/${sessionId}/stream`;
+
+        const eventSource = new EventSource(streamUrl, {
+          // Pass auth via query param or use a server-side proxy
+          // that adds the Authorization header
+          withCredentials: true,
+        });
+
+        eventSource.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          console.log("Session event:", data);
+        };
+
+        eventSource.onerror = (error) => {
+          console.error("SSE connection error:", error);
+          eventSource.close();
+        };
+        ```
+      </Tab>
+      <Tab title="WebSocket (partial / anonymous sessions)">
+        Use WebSocket when `transport` is `"websocket"` — this applies to sessions with a WCS score below 100.
+
+        ```typescript
+        // Connect to WebSocket stream for partial or anonymous sessions
+        const sessionId = session.session_id;
+        const wsUrl = `wss://api.procurenet.io/api/v7/sessions/${sessionId}/ws`;
+
+        const ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+          // Authenticate the WebSocket connection on open
+          ws.send(
+            JSON.stringify({
+              type: "auth",
+              token: process.env.PROCURENET_JWT,
+            })
+          );
+        };
+
+        ws.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+          console.log("Session event:", data);
+        };
+
+        ws.onerror = (error) => {
+          console.error("WebSocket error:", error);
+        };
+        ```
+      </Tab>
+    </Tabs>
+
+    <Info>
+      Keep your stream connection open for the lifetime of the session. ProcureNet emits state transition events, escrow status updates, and swarm intelligence results over this channel in real time.
+    </Info>
+  </Step>
+
+  <Step title="Advance the session state">
+    Sessions move through a state machine. Call `POST /api/v7/sessions/{id}/transition` with the target state to advance the session. ProcureNet validates the transition against the current state and rejects illegal moves with a deterministic error code.
+
+    ```typescript
+    const sessionId = session.session_id;
+
+    const transitionResponse = await fetch(
+      `${process.env.PROCURENET_BASE_URL}/api/v7/sessions/${sessionId}/transition`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.PROCURENET_JWT}`,
+        },
+        body: JSON.stringify({
+          target_state: "awaiting_payment",
+        }),
+      }
+    );
+
+    if (!transitionResponse.ok) {
+      const error = await transitionResponse.json();
+      console.error("Transition rejected:", error);
+    } else {
+      const result = await transitionResponse.json();
+      console.log("New session state:", result.state);
+    }
+    ```
+
+    After a successful transition, ProcureNet emits a transition event on your stream connection. Your stream handler receives the new state so your UI can update without polling.
+
+    <Tip>
+      For high-value transactions, call `POST /api/v7/sessions/{id}/escrow-accept` before the final transition to satisfy ProcureNet's legal compliance requirement. The escrow endpoint writes an immutable audit trail entry that unlocks the payment transition.
+    </Tip>
+  </Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## Deprecated Endpoint Notice
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
-</Tip>
+<Warning>
+  **`POST /api/payments/route` is deprecated** and will be removed in a future release. Migrate to the v7 pipeline:
+
+  1. Call `POST /api/v7/orchestrate` to start a WCS-scored session.
+  2. Call `POST /api/v7/sessions/{id}/funding-method` to set the payment method on the session.
+
+  The old `/api/payments/route` endpoint does not support WCS scoring, transport selection, or the v7 state machine. Any new integration should use the v7 endpoints exclusively.
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/authentication">
+    Understand all four credential types and when to use each one.
+  </Card>
+  <Card title="Prefill Data" icon="fill" href="/api/sessions-prefill">
+    Retrieve pre-populated buyer fields for resolved sessions (WCS ≥ 100).
+  </Card>
+  <Card title="USDC Payments" icon="circle-dollar-to-slot" href="/guides/field-evaluation-payments">
+    Pay field evaluators on-chain when offline evaluations sync.
+  </Card>
+  <Card title="Webhooks" icon="webhook" href="/guides/webhooks">
+    Handle Procurement Express callbacks with HMAC signature verification.
+  </Card>
+</CardGroup>

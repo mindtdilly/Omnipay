@@ -1,0 +1,248 @@
+---
+title: "How to Authenticate Every Request to ProcureNet APIs"
+sidebarTitle: "Authentication"
+description: "ProcureNet uses four credential types — mod keys, JWT bearer tokens, webhook HMAC signatures, and admin keys — each scoped to a specific part of the API."
+---
+
+ProcureNet authenticates requests through four distinct mechanisms, each scoped to a different surface of the API. Wallet and payment endpoints use a mod key passed as a custom header. Session endpoints require a JWT bearer token. Inbound webhooks from Procurement Express carry an HMAC signature you must verify before processing. Admin override endpoints require a separate admin key. Understanding which credential applies where prevents auth failures and keeps your integration secure.
+
+---
+
+## API Keys (Wallet and Payment Endpoints)
+
+Wallet and payment endpoints authenticate with a **mod key** passed in the `x-perplexity-mod-key` header. You receive this key from the ProcureNet dashboard when you create a workspace. Use it on all requests to the USDC payment bridge:
+
+- `POST /mods/procurement_wallet/usdc/request` — create a USDC payment request
+- `GET /mods/procurement_wallet/usdc/watch/{paymentId}` — poll for payment confirmation
+
+```typescript
+const response = await fetch(
+  `${process.env.PROCURENET_BASE_URL}/mods/procurement_wallet/usdc/request`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-perplexity-mod-key": process.env.PROCURENET_MOD_KEY!,
+    },
+    body: JSON.stringify({
+      tenant_id: "your-tenant-id",
+      amount_usdc: 250,
+      network: "base",
+      token: "USDC",
+      memo: "Evaluation payout — Assignment #A-1042",
+      metadata: {
+        evaluator_id: "eval_0192XZ",
+        assignment_id: "A-1042",
+      },
+    }),
+  }
+);
+
+const payment = await response.json();
+// { payment_id, deposit_address, qr_code, expires_at }
+```
+
+<Note>
+  Your mod key carries full access to the wallet API. Never embed it in client-side code, browser bundles, or public repositories. Always load it from a server-side environment variable.
+</Note>
+
+---
+
+## JWT Bearer Tokens (Session Endpoints)
+
+Session endpoints require a **JWT bearer token** in the standard `Authorization` header. You receive a JWT after authenticating with ProcureNet's identity service (consult your onboarding docs for the token exchange flow specific to your setup). Pass this token on every request to the following endpoints:
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/v7/sessions/{id}/prefill` | GET | Retrieve prefill data for resolved sessions |
+| `/api/v7/sessions/{id}/transition` | POST | Advance the session state machine |
+| `/api/v7/sessions/{id}/escrow-accept` | POST | Accept escrow for high-value transactions |
+| `/api/v7/sessions/{id}/funding-method` | POST | Set the payment method on a session |
+
+```typescript
+const sessionId = "sess_01JKAB3MXPQ7RVTZWN5";
+
+// Retrieve prefill data (resolved sessions only — WCS ≥ 100)
+const prefillResponse = await fetch(
+  `${process.env.PROCURENET_BASE_URL}/api/v7/sessions/${sessionId}/prefill`,
+  {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${process.env.PROCURENET_JWT}`,
+    },
+  }
+);
+
+const prefill = await prefillResponse.json();
+// { customer: { ... }, payment_preferences: [...] }
+```
+
+```typescript
+// Set a funding method on the session
+const fundingResponse = await fetch(
+  `${process.env.PROCURENET_BASE_URL}/api/v7/sessions/${sessionId}/funding-method`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${process.env.PROCURENET_JWT}`,
+    },
+    body: JSON.stringify({
+      method: "card",
+      token: "pm_card_visa_deferred",
+    }),
+  }
+);
+```
+
+<Tip>
+  JWTs are scoped to the session they were issued for. Passing a token from session A on a request for session B returns a `403 Forbidden` response.
+</Tip>
+
+---
+
+## Webhook Signature Verification
+
+When Procurement Express sends an approval callback to your `POST /webhooks/procurement` endpoint, it includes an HMAC signature in the `x-procure-signature` header. You **must** verify this signature before processing the payload — unverified webhooks can be spoofed by any party that knows your endpoint URL.
+
+Verification works by computing an HMAC-SHA256 digest of the raw request body using your webhook secret, then comparing it to the value in `x-procure-signature`. Use a constant-time comparison to avoid timing attacks.
+
+```typescript
+import { createHmac, timingSafeEqual } from "crypto";
+import type { IncomingMessage, ServerResponse } from "http";
+
+function verifyProcureSignature(
+  rawBody: Buffer,
+  signatureHeader: string,
+  secret: string
+): boolean {
+  const expected = createHmac("sha256", secret)
+    .update(rawBody)
+    .digest("hex");
+
+  const expectedBuf = Buffer.from(expected, "utf8");
+  const receivedBuf = Buffer.from(signatureHeader, "utf8");
+
+  // Buffers must be the same length before timingSafeEqual
+  if (expectedBuf.length !== receivedBuf.length) {
+    return false;
+  }
+
+  return timingSafeEqual(expectedBuf, receivedBuf);
+}
+
+// Example Express handler
+app.post(
+  "/webhooks/procurement",
+  express.raw({ type: "application/json" }),
+  (req: IncomingMessage & { body: Buffer }, res: ServerResponse) => {
+    const signature = req.headers["x-procure-signature"] as string;
+
+    if (!signature) {
+      res.writeHead(400);
+      res.end("Missing signature");
+      return;
+    }
+
+    const isValid = verifyProcureSignature(
+      req.body,
+      signature,
+      process.env.PROCURENET_WEBHOOK_SECRET!
+    );
+
+    if (!isValid) {
+      res.writeHead(401);
+      res.end("Invalid signature");
+      return;
+    }
+
+    const payload = JSON.parse(req.body.toString());
+    // payload: { session_id, decision: "approved" | "rejected", actor, reason? }
+    console.log("Procurement approval received:", payload);
+
+    res.writeHead(204);
+    res.end();
+  }
+);
+```
+
+<Warning>
+  Always read the raw request body **before** any JSON parsing middleware runs. If your framework parses the body into an object first, re-serializing it can change whitespace and break the HMAC digest, causing all verification checks to fail.
+</Warning>
+
+---
+
+## Admin Keys
+
+The `x-admin-key` header is required for manual payment confirmation at `POST /mods/procurement_wallet/usdc/manual-confirm`. This endpoint exists for operational overrides — for example, when an on-chain confirmation is delayed and you need to unblock a field evaluator's payout manually.
+
+Pass both your mod key and your admin key together on this request:
+
+```typescript
+const confirmResponse = await fetch(
+  `${process.env.PROCURENET_BASE_URL}/mods/procurement_wallet/usdc/manual-confirm`,
+  {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-perplexity-mod-key": process.env.PROCURENET_MOD_KEY!,
+      "x-admin-key": process.env.PROCURENET_ADMIN_KEY!,
+    },
+    body: JSON.stringify({
+      payment_id: "pay_01HXYZ77BBQRST",
+    }),
+  }
+);
+
+const result = await confirmResponse.json();
+// { confirmed: true, transaction_hash: "0xabc..." }
+```
+
+<Warning>
+  Admin keys grant override authority over payment confirmation. Treat them with the same security rigor as private keys — restrict access to server-side infrastructure only, rotate them immediately if exposed, and audit their use through your logging pipeline.
+</Warning>
+
+---
+
+## Error Reference
+
+When authentication fails, ProcureNet returns one of the following HTTP status codes:
+
+| Status | Meaning | Common Causes |
+|---|---|---|
+| `401 Unauthorized` | Missing or invalid credential | No `Authorization` header, expired JWT, malformed mod key, failed HMAC verification |
+| `403 Forbidden` | Valid credential but insufficient access | JWT scoped to a different session, prefill requested on a non-resolved session (WCS &lt; 100), admin endpoint called without `x-admin-key` |
+| `429 Too Many Requests` | Rate limit exceeded | Too many requests in a short window; back off and retry with exponential delay |
+
+<Accordion title="Handling 401 vs 403 in your client">
+  A `401` means the credential itself is unrecognized or malformed — check that you're sending the right header name, that the token hasn't expired, and that you haven't accidentally URL-encoded the value.
+
+  A `403` means ProcureNet recognized your credential but the specific action is not permitted. The most common cause is calling `GET /api/v7/sessions/{id}/prefill` on a session with a WCS score below 100. Check the `mode` field from your original orchestration response before attempting prefill.
+</Accordion>
+
+---
+
+## Credential Summary
+
+<CardGroup cols={2}>
+  <Card title="x-perplexity-mod-key" icon="key">
+    **Scope:** Wallet and USDC payment endpoints  
+    **Where to get it:** ProcureNet dashboard  
+    **Never expose:** client-side code or public repos
+  </Card>
+  <Card title="Authorization: Bearer JWT" icon="id-badge">
+    **Scope:** All `/api/v7/sessions/{id}/...` endpoints  
+    **Where to get it:** ProcureNet identity service token exchange  
+    **Scoped to:** individual sessions
+  </Card>
+  <Card title="x-procure-signature" icon="shield-check">
+    **Scope:** Inbound webhook verification  
+    **Where to get it:** ProcureNet dashboard (webhook secret)  
+    **Direction:** Inbound — you verify it, not send it
+  </Card>
+  <Card title="x-admin-key" icon="shield-halved">
+    **Scope:** Manual payment confirmation only  
+    **Where to get it:** ProcureNet account team  
+    **Never expose:** client-side code, logs, or public repos
+  </Card>
+</CardGroup>

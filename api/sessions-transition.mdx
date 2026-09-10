@@ -1,0 +1,131 @@
+---
+title: "POST /api/v7/sessions/{id}/transition — Advance State"
+sidebarTitle: "POST /transition"
+description: "Advance a session through the procurement state machine. Illegal moves return deterministic error codes. Every call emits an observability pipeline event."
+---
+
+ProcureNet manages each procurement session as a strict state machine. Calling this endpoint moves the session forward to a target state you specify. The engine validates that the transition is permitted from the session's current state — if it isn't, you receive a deterministic `400` error with a machine-readable rejection code so your integration can handle it without guesswork. Every successful transition also emits an event to the observability pipeline, giving you a complete, timestamped audit trail of how a session progressed.
+
+## Authentication
+
+<Warning>
+  This endpoint requires a valid Bearer JWT in the `Authorization` header. Requests without a token, or with an expired or malformed token, receive `401 Unauthorized`.
+</Warning>
+
+```
+Authorization: Bearer <your_jwt>
+```
+
+## Path Parameters
+
+<ParamField path="id" type="string" required>
+  The session ID returned by `POST /api/v7/orchestrate`. Identifies the session whose state machine you are advancing.
+</ParamField>
+
+## Request Body
+
+<ParamField body="to" type="string" required>
+  The target state to transition the session into. The engine enforces which transitions are valid from the session's current state and rejects any that are out of sequence.
+
+  Common target states include:
+
+  | State | Meaning |
+  |---|---|
+  | `pending_payment` | Buyer has confirmed their cart; awaiting funding method |
+  | `escrow_pending` | High-value transaction detected; escrow acceptance required |
+  | `payment_processing` | Funding method submitted; payment is in flight |
+  | `completed` | Transaction finalized |
+  | `cancelled` | Session terminated by buyer or system |
+</ParamField>
+
+## Request Example
+
+```typescript
+const sessionId = 'sess_abc123';
+
+const res = await fetch(
+  `https://api.procurenet.io/api/v7/sessions/${sessionId}/transition`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ to: 'pending_payment' })
+  }
+);
+
+const result = await res.json();
+// {
+//   "session_id": "sess_abc123",
+//   "previous_state": "orchestrated",
+//   "current_state": "pending_payment",
+//   "transitioned_at": "2026-04-01T14:23:11Z"
+// }
+```
+
+## Response Fields
+
+<ResponseField name="session_id" type="string" required>
+  Echoes back the session ID for correlation in your logs.
+</ResponseField>
+
+<ResponseField name="previous_state" type="string" required>
+  The state the session was in immediately before this transition.
+</ResponseField>
+
+<ResponseField name="current_state" type="string" required>
+  The state the session has moved into as a result of this call. This will match the `to` value you submitted.
+</ResponseField>
+
+<ResponseField name="transitioned_at" type="string" required>
+  ISO 8601 timestamp of when the transition was recorded. This is the same timestamp written to the observability pipeline event.
+</ResponseField>
+
+## Response Example
+
+```json
+{
+  "session_id": "sess_abc123",
+  "previous_state": "orchestrated",
+  "current_state": "pending_payment",
+  "transitioned_at": "2026-04-01T14:23:11Z"
+}
+```
+
+## Handling Illegal Transitions
+
+If you attempt a transition that is not valid from the session's current state, the engine returns `400` with a structured error body. Parse the `code` field to drive retry or fallback logic in your integration.
+
+```typescript
+if (!res.ok) {
+  const err = await res.json();
+  // err.code === 'ILLEGAL_TRANSITION'
+  // err.current_state === 'payment_processing'
+  // err.attempted === 'pending_payment'
+  console.error(`Cannot transition: ${err.message}`);
+}
+```
+
+```json
+{
+  "code": "ILLEGAL_TRANSITION",
+  "message": "Cannot move to 'pending_payment' from 'payment_processing'.",
+  "current_state": "payment_processing",
+  "attempted": "pending_payment"
+}
+```
+
+<Info>
+  Every successful transition — and every rejected attempt — is emitted as a structured event to the ProcureNet observability pipeline. You can use these events to reconstruct the full lifecycle of any session for debugging or compliance purposes.
+</Info>
+
+## Error Codes
+
+| HTTP Status | Code | Description |
+|---|---|---|
+| `400 Bad Request` | `ILLEGAL_TRANSITION` | The `to` state is not reachable from the session's current state. |
+| `400 Bad Request` | `UNKNOWN_STATE` | The `to` value is not a recognized session state. |
+| `401 Unauthorized` | — | Missing, expired, or invalid Bearer JWT. |
+| `404 Not Found` | — | No session exists for the provided `id`. |
+| `410 Gone` | `SESSION_EXPIRED` | The session has passed its TTL and can no longer be transitioned. Start a new session with `POST /api/v7/orchestrate`. |

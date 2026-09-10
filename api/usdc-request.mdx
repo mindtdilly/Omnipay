@@ -1,0 +1,152 @@
+---
+title: "Create a USDC Payment Request — ProcureNet Wallet"
+sidebarTitle: "POST /usdc/request"
+description: "Initiate an on-chain USDC payment request for a tenant. Returns a deposit address, optional QR code, and a payment_id to track confirmation."
+---
+
+The USDC payment request endpoint creates an on-chain payment instruction for a specific tenant and amount. When a field evaluator's offline evaluation syncs successfully, `VCIProcureNetBridge` calls this endpoint automatically to initiate settlement. You can also call it directly to request payment outside of the automated sync flow. Each response includes a `payment_id` you can pass to the watch or manual-confirm endpoints to track the transaction's on-chain status.
+
+## Endpoint
+
+```http
+POST /mods/procurement_wallet/usdc/request
+```
+
+## Authentication
+
+All requests to the wallet mod endpoints require your mod API key in the `x-perplexity-mod-key` header.
+
+```text
+x-perplexity-mod-key: <your-api-key>
+```
+
+## Request Body
+
+<ParamField body="tenant_id" type="string" required>
+  Your tenant identifier. This must match a tenant registered in ProcureNet. Requests for unregistered tenants return `422`.
+</ParamField>
+
+<ParamField body="amount_usdc" type="number" required>
+  Payment amount in USDC. Must be a positive number. The `VCIProcureNetBridge` derives this automatically from the evaluator's average score using the following tiers:
+
+  | Average Score | Payment |
+  |---|---|
+  | ≥ 9.0 | 500 USDC |
+  | ≥ 7.0 | 250 USDC |
+  | ≥ 5.0 | 100 USDC |
+  | < 5.0 | 0 USDC (no payment created) |
+</ParamField>
+
+<ParamField body="network" type="string" required>
+  The blockchain network on which to route the payment. Accepted values: `base`, `arbitrum`, `polygon`, `ethereum`.
+</ParamField>
+
+<ParamField body="token" type="string" required>
+  Token type. Always pass `"USDC"`.
+</ParamField>
+
+<ParamField body="memo" type="string" required>
+  A human-readable description attached to the payment. For VCI evaluations, the bridge generates this automatically in the format `VCI Eval: <assignmentId> | Score: <avg>`.
+</ParamField>
+
+<ParamField body="metadata" type="object">
+  Arbitrary key-value pairs attached to the payment record. Use this field to link the payment back to your internal records — for example, an evaluator ID, assignment ID, or GPS snapshot. Keys and values must be JSON-serializable.
+
+  <Expandable title="Common metadata keys">
+    | Key | Type | Description |
+    |---|---|---|
+    | `evaluator_id` | string | Your internal evaluator identifier |
+    | `assignment_id` | string | The assignment this payment covers |
+    | `vci_local_id` | number | Local offline queue record ID |
+    | `gps` | object | GPS snapshot at time of evaluation |
+    | `submitted_at` | string | ISO 8601 timestamp of offline submission |
+  </Expandable>
+</ParamField>
+
+## Code Example
+
+<CodeGroup>
+```typescript TypeScript
+import { ProcureNetWalletClient } from './integrations/VCIProcureNetBridge';
+
+const wallet = new ProcureNetWalletClient(
+  'https://api.procurenet.io',
+  process.env.PROCURENET_MOD_KEY!,
+  { autoWatch: true }
+);
+
+const payment = await wallet.createUSDCPayment({
+  tenant_id: 'tenant_abc',
+  amount_usdc: 250,
+  network: 'base',
+  token: 'USDC',
+  memo: 'VCI Eval: assign_789 | Score: 7.50',
+  metadata: {
+    evaluator_id: 'eval_456',
+    assignment_id: 'assign_789'
+  }
+});
+
+console.log(payment.payment_id);       // 'pay_xyz789'
+console.log(payment.deposit_address);  // '0xabc123...'
+console.log(payment.expires_at);       // '2025-09-01T12:00:00Z'
+```
+
+```bash cURL
+curl -X POST https://api.procurenet.io/mods/procurement_wallet/usdc/request \
+  -H "Content-Type: application/json" \
+  -H "x-perplexity-mod-key: $PROCURENET_MOD_KEY" \
+  -d '{
+    "tenant_id": "tenant_abc",
+    "amount_usdc": 250,
+    "network": "base",
+    "token": "USDC",
+    "memo": "VCI Eval: assign_789 | Score: 7.50",
+    "metadata": {
+      "evaluator_id": "eval_456",
+      "assignment_id": "assign_789"
+    }
+  }'
+```
+</CodeGroup>
+
+## Response
+
+<ResponseField name="payment_id" type="string" required>
+  Unique identifier for this payment request. Pass this value to [`GET /usdc/watch/{paymentId}`](/api/usdc-watch) to poll confirmation, or to [`POST /usdc/manual-confirm`](/api/usdc-manual-confirm) to force-confirm.
+</ResponseField>
+
+<ResponseField name="deposit_address" type="string" required>
+  The on-chain wallet address that will receive the USDC transfer.
+</ResponseField>
+
+<ResponseField name="qr_code" type="string">
+  A data URI containing a QR code image for the deposit address. Render this in your UI so evaluators can scan and pay directly from a mobile wallet.
+</ResponseField>
+
+<ResponseField name="expires_at" type="string">
+  ISO 8601 timestamp after which this payment request is no longer valid. If the on-chain transfer is not confirmed before this time, the request expires and you must create a new one.
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "payment_id": "pay_xyz789",
+  "deposit_address": "0xabc123def456abc123def456abc123def456abc1",
+  "qr_code": "data:image/png;base64,iVBORw0KGgo...",
+  "expires_at": "2025-09-01T12:00:00Z"
+}
+```
+
+## Error Codes
+
+| Status | Meaning |
+|---|---|
+| `400` | Invalid `network` value or `amount_usdc` is zero or negative |
+| `401` | Missing or invalid `x-perplexity-mod-key` header |
+| `422` | `tenant_id` does not match a registered ProcureNet tenant |
+
+<Tip>
+  Store `payment_id` and `deposit_address` in your queue metadata immediately after a successful response. The `VCIProcureNetBridge` does this automatically via `queue.updateRecordMetadata()`.
+</Tip>

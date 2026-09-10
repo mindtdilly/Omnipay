@@ -1,0 +1,139 @@
+---
+title: "Receive Procurement Approval Webhooks Securely"
+sidebarTitle: "Webhooks"
+description: "Verify HMAC-signed Procurement Express callbacks and use approval decisions to resume or terminate your orchestration sessions in real time."
+---
+
+When a procurement approval decision is made in Procurement Express, ProcureNet sends a signed HTTP callback to your registered endpoint. These webhooks let your backend react to approval outcomes in real time — resuming a suspended orchestration flow on approval or cleaning up session state on rejection. Every inbound callback includes an `x-procure-signature` HMAC header that you must verify before processing any payload.
+
+## Webhook Payload
+
+Every callback sent to `POST /webhooks/procurement` contains the following fields:
+
+<ResponseField name="session_id" type="string" required>
+  The ProcureNet session ID this decision applies to.
+</ResponseField>
+
+<ResponseField name="decision" type="string" required>
+  The approval outcome. One of `"approved"` or `"rejected"`.
+</ResponseField>
+
+<ResponseField name="actor" type="string" required>
+  The identifier of the user or system that made the approval decision.
+</ResponseField>
+
+<ResponseField name="reason" type="string">
+  An optional human-readable explanation for the decision. Populated on rejections and some approvals.
+</ResponseField>
+
+## Setting Up Your Webhook Endpoint
+
+<Steps>
+
+### Obtain Your Webhook Secret
+
+Log in to ProcureNet settings and navigate to **Webhooks**. Generate or copy your webhook secret. Store it as an environment variable — never hard-code it in source.
+
+```bash
+export WEBHOOK_SECRET=your_webhook_secret_here
+```
+
+### Register Your Endpoint URL
+
+In ProcureNet settings, add your server's public URL as a Procurement Express callback target. ProcureNet will `POST` to this URL for every approval decision event.
+
+### Implement HMAC Verification
+
+For every inbound request, compute the expected HMAC signature from the raw request body using your webhook secret and compare it to the `x-procure-signature` header. Reject any request where they do not match.
+
+```typescript
+import { createHmac } from 'crypto';
+
+function verifySignature(payload: string, signature: string, secret: string): boolean {
+  const expected = createHmac('sha256', secret).update(payload).digest('hex');
+  return `sha256=${expected}` === signature;
+}
+
+// In your webhook handler:
+app.post('/webhooks/procurement', (req, res) => {
+  const signature = req.headers['x-procure-signature'] as string;
+  const rawBody = JSON.stringify(req.body);
+
+  if (!verifySignature(rawBody, signature, process.env.WEBHOOK_SECRET!)) {
+    return res.status(401).send('Invalid signature');
+  }
+
+  const { session_id, decision, actor } = req.body;
+  // Resume or cancel the orchestration flow based on the decision
+  res.status(204).send();
+});
+```
+
+<Warning>
+  Always verify the `x-procure-signature` header before reading or acting on the payload. Never trust unverified callbacks — an attacker could spoof approval decisions against your endpoint.
+</Warning>
+
+### Return HTTP 204 on Success
+
+Respond with `204 No Content` after successfully processing the webhook. ProcureNet treats any non-2xx response as a failure and will retry delivery with exponential backoff.
+
+</Steps>
+
+## Handling Decisions in Your Application
+
+<Note>
+  An `"approved"` decision resumes a suspended orchestration flow — call `POST /api/v7/sessions/{id}/transition` with the appropriate event to continue. A `"rejected"` decision terminates the session; clean up any pending UI state and notify the buyer.
+</Note>
+
+Use the `decision` field to branch your handler logic:
+
+```typescript
+app.post('/webhooks/procurement', (req, res) => {
+  const signature = req.headers['x-procure-signature'] as string;
+  const rawBody = JSON.stringify(req.body);
+
+  if (!verifySignature(rawBody, signature, process.env.WEBHOOK_SECRET!)) {
+    return res.status(401).send('Invalid signature');
+  }
+
+  const { session_id, decision, actor, reason } = req.body;
+
+  if (decision === 'approved') {
+    // Resume the orchestration session
+    resumeSession(session_id);
+  } else if (decision === 'rejected') {
+    // Terminate session and surface the reason to the buyer
+    cancelSession(session_id, reason);
+  }
+
+  res.status(204).send();
+});
+```
+
+## Signature Verification Reference
+
+The `x-procure-signature` header uses the format `sha256=<hex_digest>`. ProcureNet computes the HMAC-SHA256 of the raw JSON request body using your webhook secret. Your verification must use the **raw body bytes** — do not parse and re-serialize the JSON before computing the digest, as field ordering or whitespace differences will cause a mismatch.
+
+<CodeGroup>
+
+```typescript TypeScript
+import { createHmac } from 'crypto';
+
+function verifySignature(payload: string, signature: string, secret: string): boolean {
+  const expected = createHmac('sha256', secret).update(payload).digest('hex');
+  return `sha256=${expected}` === signature;
+}
+```
+
+```python Python
+import hmac
+import hashlib
+
+def verify_signature(payload: str, signature: str, secret: str) -> bool:
+    expected = 'sha256=' + hmac.new(
+        secret.encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature)
+```
+
+</CodeGroup>

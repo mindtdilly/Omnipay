@@ -1,0 +1,107 @@
+---
+title: "USDC Payment Settlement on EVM Networks"
+sidebarTitle: "Payment Settlement"
+description: "Learn how ProcureNet settles payments in USDC across Base, Arbitrum, Polygon, and Ethereum, including field evaluator payout tiers."
+---
+
+ProcureNet settles payments in USDC stablecoins on EVM-compatible networks. Whether you are integrating a buyer-facing checkout, running a procurement workflow, or disbursing payments to field evaluators, every payment follows the same on-chain settlement path: a payment request is created, a deposit address is shared with the payer, and the system watches for confirmation before releasing funds. This approach ensures deterministic, auditable settlement without reliance on traditional payment rails.
+
+## Supported Networks
+
+You can settle payments on any of the following EVM networks. Specify the network when creating a payment request.
+
+<CardGroup cols={2}>
+  <Card title="Base" icon="circle-b">
+    Low fees and fast finality. Recommended for high-volume procurement flows.
+  </Card>
+  <Card title="Arbitrum" icon="circle-a">
+    Layer-2 rollup on Ethereum with low transaction costs and broad wallet support.
+  </Card>
+  <Card title="Polygon" icon="hexagon-check">
+    Widely supported, low-cost EVM network with mature tooling.
+  </Card>
+  <Card title="Ethereum" icon="ethereum">
+    The canonical EVM mainnet. Use when counterparties require settlement on L1.
+  </Card>
+</CardGroup>
+
+## Payment Flow
+
+Follow these steps to create and confirm a USDC payment.
+
+<Steps>
+  <Step title="Create a payment request">
+    Call `POST /mods/procurement_wallet/usdc/request` with the amount, network, and any evaluation metadata. Authenticate using your `x-perplexity-mod-key` header.
+
+    ```bash
+    curl -X POST https://api.procurenet.io/mods/procurement_wallet/usdc/request \
+      -H "x-perplexity-mod-key: <api_key>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "amount": 250,
+        "network": "base",
+        "currency": "USDC",
+        "recipient": "0xYourWalletAddress"
+      }'
+    ```
+
+    The response includes a `payment_id`, `deposit_address`, `qr_code`, and `expires_at` timestamp.
+  </Step>
+
+  <Step title="Share the deposit address with the payer">
+    Display the `deposit_address` or render the `qr_code` in your UI. The payer sends USDC to this address on the specified network. No additional API call is needed at this stage — ProcureNet monitors the address automatically.
+  </Step>
+
+  <Step title="Watch for confirmation">
+    Poll `GET /mods/procurement_wallet/usdc/watch/{paymentId}` to check settlement status. The endpoint returns the current confirmation state and, once confirmed, a `transaction_hash`.
+
+    ```bash
+    curl https://api.procurenet.io/mods/procurement_wallet/usdc/watch/pay_xyz \
+      -H "x-perplexity-mod-key: <api_key>"
+    ```
+
+    Continue polling until the response status is `confirmed`. Implement exponential backoff — most networks confirm within seconds on Base and Arbitrum, and within minutes on Ethereum mainnet.
+  </Step>
+
+  <Step title="Receive the transaction hash">
+    On confirmation, the watch endpoint returns a `transaction_hash`. Store this value as your permanent, on-chain proof of settlement. It can be verified independently on any EVM block explorer for the target network.
+  </Step>
+</Steps>
+
+<Info>
+  Each payment request carries an `expires_at` timestamp. If the payer has not sent funds before that time, the request expires and cannot be confirmed. Create a new payment request and share the updated `deposit_address` with the payer.
+</Info>
+
+## VCI Field Evaluator Payment Tiers
+
+For field evaluation workflows, ProcureNet calculates the USDC payout automatically based on the evaluator's average quality score. You do not need to specify an amount manually — pass the evaluation results when creating the payment request and the bridge applies the correct tier.
+
+<Note>
+  Payments for field evaluations include GPS metadata from the evaluator's device when location data is available at sync time. This metadata is stored alongside the transaction record for audit purposes.
+</Note>
+
+| Average Evaluation Score | USDC Payout |
+|---|---|
+| ≥ 9.0 | 500 USDC |
+| ≥ 7.0 | 250 USDC |
+| ≥ 5.0 | 100 USDC |
+| < 5.0 | 0 USDC |
+
+<Accordion title="How the tier is calculated">
+  The VCI bridge averages all evaluation scores submitted in a sync batch. If an evaluator submits five evaluations with scores of 8.5, 9.2, 7.8, 8.0, and 9.5, their average is 8.6 — which falls into the ≥ 7.0 tier and triggers a 250 USDC payout. The bridge computes this automatically; no manual tier selection is exposed via the API.
+</Accordion>
+
+## Admin Manual Confirmation
+
+In exceptional cases — such as on-chain delays or network congestion — an administrator can manually confirm a payment using `POST /mods/procurement_wallet/usdc/manual-confirm`. This endpoint requires an `x-admin-key` header and should only be used when automated confirmation has stalled.
+
+```bash
+curl -X POST https://api.procurenet.io/mods/procurement_wallet/usdc/manual-confirm \
+  -H "x-admin-key: <admin_key>" \
+  -H "Content-Type: application/json" \
+  -d '{ "payment_id": "pay_xyz", "transaction_hash": "0xabc..." }'
+```
+
+<Warning>
+  Manual confirmation bypasses on-chain verification. Only use this endpoint when you have independently verified the transaction on a block explorer and are certain the funds have arrived. Misuse can result in double-confirmation or incorrect payout records.
+</Warning>

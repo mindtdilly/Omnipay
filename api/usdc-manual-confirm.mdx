@@ -1,0 +1,138 @@
+---
+title: "Manually Confirm a USDC Payment — Admin Override"
+sidebarTitle: "POST /manual-confirm"
+description: "Force-confirm a pending USDC payment request using elevated admin credentials. Use when autoWatch is disabled or automated confirmation has stalled."
+---
+
+The manual confirmation endpoint lets an administrator force a USDC payment into confirmed status without waiting for the automated on-chain watch cycle. This is an elevated operation intended for operational recovery — use it when `autoWatch` is disabled on your `ProcureNetWalletClient`, when a payment has stalled due to network delays, or when you need to confirm a payment outside the normal polling window. The `VCIProcureNetBridge` exposes this via the `manualConfirmPayment()` method, which accepts a local queue record ID and resolves the associated `payment_id` automatically.
+
+## Endpoint
+
+```http
+POST /mods/procurement_wallet/usdc/manual-confirm
+```
+
+## Authentication
+
+This endpoint requires **both** your mod API key and an admin key. Both headers must be present and valid; a missing or invalid header on either returns `401`.
+
+```text
+x-perplexity-mod-key: <your-api-key>
+x-admin-key: <your-admin-key>
+```
+
+<Warning>
+  Your admin key is an elevated credential that bypasses normal on-chain confirmation requirements. Never expose `x-admin-key` in client-side code, browser environments, or mobile apps. Restrict all calls to this endpoint to server-side admin workflows with access controls and audit logging in place.
+</Warning>
+
+## Request Body
+
+<ParamField body="payment_id" type="string" required>
+  The `payment_id` of the payment you want to manually confirm. You can retrieve this from the original create-request response, or from the queue record's metadata under the key `procurenet_payment_id` when using `VCIProcureNetBridge`.
+</ParamField>
+
+## Code Example
+
+<CodeGroup>
+```typescript TypeScript
+import { VCIProcureNetBridge, ProcureNetWalletClient } from './integrations/VCIProcureNetBridge';
+
+// Using VCIProcureNetBridge (resolves payment_id from queue record automatically)
+const result = await bridge.manualConfirmPayment(
+  localId,                   // local queue record ID (number)
+  process.env.ADMIN_KEY!
+);
+
+if (result.confirmed) {
+  console.log('Payment manually confirmed. TX:', result.transaction_hash);
+} else {
+  console.warn('Manual confirmation did not result in a confirmed status.');
+}
+```
+
+```typescript Direct Client Call
+import { ProcureNetWalletClient } from './integrations/VCIProcureNetBridge';
+
+const wallet = new ProcureNetWalletClient(
+  'https://api.procurenet.io',
+  process.env.PROCURENET_MOD_KEY!
+);
+
+const result = await wallet.manualConfirm(
+  'pay_xyz789',
+  process.env.ADMIN_KEY!
+);
+
+if (result.confirmed) {
+  console.log('Transaction hash:', result.transaction_hash);
+}
+```
+
+```bash cURL
+curl -X POST https://api.procurenet.io/mods/procurement_wallet/usdc/manual-confirm \
+  -H "Content-Type: application/json" \
+  -H "x-perplexity-mod-key: $PROCURENET_MOD_KEY" \
+  -H "x-admin-key: $ADMIN_KEY" \
+  -d '{ "payment_id": "pay_xyz789" }'
+```
+</CodeGroup>
+
+## When to Use Manual Confirmation
+
+<CardGroup cols={2}>
+  <Card title="autoWatch Disabled" icon="eye-slash">
+    If you initialized `ProcureNetWalletClient` with `autoWatch: false`, the bridge will not poll for on-chain confirmations. Use this endpoint to confirm payments after you have verified the transfer through an external source.
+  </Card>
+  <Card title="Stalled Confirmation" icon="clock">
+    If a payment remains unconfirmed longer than expected — for example, due to network congestion on Ethereum mainnet — you can use this endpoint to unblock the settlement queue.
+  </Card>
+  <Card title="Operational Recovery" icon="wrench">
+    During incidents where the watch service is temporarily unavailable, you can replay confirmations for all affected payments using this endpoint from a secure admin context.
+  </Card>
+  <Card title="Testing & Staging" icon="flask">
+    In non-production environments where you are not routing real on-chain transfers, use manual confirmation to exercise the rest of your payment settlement workflow without waiting for blockchain activity.
+  </Card>
+</CardGroup>
+
+## Response
+
+<ResponseField name="confirmed" type="boolean" required>
+  `true` when the payment has been successfully force-confirmed. In most cases this will be `true` on a valid request, but may return `false` if the payment is already in a terminal failure state.
+</ResponseField>
+
+<ResponseField name="transaction_hash" type="string">
+  The blockchain transaction hash if one is available. For manually confirmed payments, this may be absent if the payment was confirmed without a corresponding on-chain transfer.
+</ResponseField>
+
+### Example Response
+
+```json
+{
+  "confirmed": true,
+  "transaction_hash": "0x4f3c8b2a1e9d7f6c0b5a4e3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b"
+}
+```
+
+## Bridge Behavior After Confirmation
+
+When you call `bridge.manualConfirmPayment()`, the bridge automatically writes back to the queue record on success:
+
+```typescript
+await this.queue.updateRecordMetadata(localId, {
+  status: 'payment_confirmed',
+  tx_hash: result.transaction_hash,
+});
+```
+
+This keeps your offline queue in sync with the confirmed payment state so downstream processes see the record as fully settled.
+
+## Error Codes
+
+| Status | Meaning |
+|---|---|
+| `401` | Missing or invalid `x-perplexity-mod-key` or `x-admin-key` header |
+| `404` | No payment found for the given `payment_id` |
+
+<Info>
+  If you need to confirm payments in bulk — for example, to recover a batch of stalled evaluations — iterate over affected local queue records and call `bridge.manualConfirmPayment()` for each one. The bridge resolves `payment_id` for you from the queue metadata, so you only need the local record ID.
+</Info>

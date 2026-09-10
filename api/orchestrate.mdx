@@ -1,0 +1,127 @@
+---
+title: "POST /api/v7/orchestrate — Start Procurement Session"
+sidebarTitle: "POST /orchestrate"
+description: "Start a procurement session. ProcureNet scores buyer identity hints and returns a session ID, WCS score, routing mode, and transport channel."
+---
+
+The `/api/v7/orchestrate` endpoint is the entry point for every procurement session. You submit a transaction amount, currency, and optional buyer identity hints; ProcureNet's Wallet Confidence Score (WCS) engine evaluates those hints, assigns a score from 0 to 200, and returns a session ID along with the resolved routing mode and the transport channel your client should open. No authentication is required on this call — the WCS engine derives trust from the hints you supply, not from a credential.
+
+## Request Body
+
+<ParamField body="amount" type="number" required>
+  The transaction amount in the specified currency. For example, `1500.00`.
+</ParamField>
+
+<ParamField body="currency" type="string" required>
+  ISO 4217 currency code for the transaction. For example, `"USD"` or `"EUR"`.
+</ParamField>
+
+<ParamField body="hints" type="object">
+  Optional buyer identity signals used to calculate the WCS. The more signals you provide, the higher the score and the more prefill and SSE transport features become available.
+
+  <Expandable title="hints fields">
+    <ParamField body="hints.customerId" type="string">
+      A known, persistent customer ID from your system. Contributes **100 points** to the WCS — the single highest-weight signal. Providing this alone is sufficient to reach the `resolved` threshold.
+    </ParamField>
+
+    <ParamField body="hints.email" type="string">
+      The buyer's email address. Contributes **40 points** to the WCS.
+    </ParamField>
+
+    <ParamField body="hints.phone" type="string">
+      The buyer's phone number in E.164 format (e.g., `"+15551234567"`). Contributes **40 points** to the WCS.
+    </ParamField>
+
+    <ParamField body="hints.deviceId" type="string">
+      A device fingerprint or identifier for the buyer's current device. Contributes **20 points** to the WCS.
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<Note>
+  The maximum possible WCS is **200** (all four hints provided). A score of **≥ 100** resolves the session to `resolved` mode with SSE transport. Scores of **40–99** produce `partial` mode, and scores **below 40** produce `anonymous` mode — both use WebSocket transport.
+</Note>
+
+## Request Example
+
+```typescript
+const res = await fetch('https://api.procurenet.io/api/v7/orchestrate', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    amount: 1500.00,
+    currency: 'USD',
+    hints: {
+      customerId: 'cust_8f2a1b',
+      email: 'buyer@example.com',
+      phone: '+15551234567',
+      deviceId: 'dev_9c3d2e'
+    }
+  })
+});
+
+const session = await res.json();
+// {
+//   session_id: 'sess_abc123',
+//   wcs_score: 200,
+//   mode: 'resolved',
+//   transport: 'sse'
+// }
+```
+
+## Response Fields
+
+<ResponseField name="session_id" type="string" required>
+  The unique session identifier. Pass this as the `{id}` path parameter in all subsequent session calls: prefill, transition, escrow-accept, and funding-method.
+</ResponseField>
+
+<ResponseField name="wcs_score" type="integer" required>
+  The calculated Wallet Confidence Score, ranging from `0` to `200`. Reflects the sum of the hint weights provided.
+</ResponseField>
+
+<ResponseField name="mode" type="string" required>
+  The resolved session classification. One of:
+
+  | Value | WCS Range | Meaning |
+  |---|---|---|
+  | `resolved` | ≥ 100 | Full buyer identity confirmed; prefill available |
+  | `partial` | 40–99 | Partial identity; limited prefill |
+  | `anonymous` | < 40 | No reliable identity signals |
+</ResponseField>
+
+<ResponseField name="transport" type="string" required>
+  The recommended transport channel for real-time session events. `sse` for `resolved` sessions; `websocket` for `partial` and `anonymous`.
+</ResponseField>
+
+## Response Example
+
+```json
+{
+  "session_id": "sess_abc123",
+  "wcs_score": 200,
+  "mode": "resolved",
+  "transport": "sse"
+}
+```
+
+## WCS Score Reference
+
+<CardGroup cols={3}>
+  <Card title="resolved" icon="circle-check">
+    Score **≥ 100** — Full prefill access, SSE transport, all session features unlocked.
+  </Card>
+  <Card title="partial" icon="circle-half-stroke">
+    Score **40–99** — Reduced prefill, WebSocket transport required.
+  </Card>
+  <Card title="anonymous" icon="circle-xmark">
+    Score **< 40** — No prefill available, WebSocket transport required.
+  </Card>
+</CardGroup>
+
+## Error Codes
+
+| HTTP Status | Description |
+|---|---|
+| `400 Bad Request` | Missing required fields (`amount` or `currency`), or malformed request body. |
+| `422 Unprocessable Entity` | Field validation failed — for example, an unrecognized `currency` code. |
+| `500 Internal Server Error` | WCS engine or orchestration pipeline failure. Retry with exponential backoff. |

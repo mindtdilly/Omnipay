@@ -1,0 +1,88 @@
+---
+title: "Use Escrow Flows for High-Value Transactions"
+sidebarTitle: "Escrow Flows"
+description: "Trigger and accept ProcureNet escrow on high-value sessions to satisfy compliance requirements and generate an immutable procurement audit trail."
+---
+
+For high-value procurement transactions, ProcureNet automatically routes sessions through an escrow acceptance step before funds are committed. This provides a legally meaningful checkpoint — an authorized party explicitly accepts the transaction terms — and writes an immutable audit trail entry that cannot be altered or deleted after acceptance. If your account has a transaction threshold configured, any session that crosses it will pause at `escrow_pending` and wait for an authorized call to proceed.
+
+## When Escrow Is Triggered
+
+ProcureNet transitions a session to the `escrow_pending` state automatically when the transaction amount exceeds your account's configured threshold. You do not need to request this manually. Once a session enters `escrow_pending`, it will not advance until an authorized party calls the escrow acceptance endpoint.
+
+<Info>
+  Your transaction threshold is defined by your account policy. To review or adjust your threshold, contact ProcureNet support.
+</Info>
+
+## How the Escrow Flow Works
+
+<Steps>
+
+### Session Reaches `escrow_pending`
+
+When the session amount exceeds your threshold, ProcureNet pauses the session and emits an `escrow_pending` state event on your session stream. Listen for this state on your SSE or WebSocket connection to trigger any UI-level review prompt.
+
+### Authorized Party Reviews Transaction Details
+
+Before calling the escrow acceptance endpoint, the authorized buyer or delegated party should review the transaction amount, funding method, and any procurement contract terms associated with the session. This review step is your compliance window.
+
+### Call `POST /api/v7/sessions/{id}/escrow-accept`
+
+Send a `POST` request to the escrow acceptance endpoint with a valid Bearer JWT. The JWT must belong to the authorized buyer or a delegated party with escrow acceptance permissions.
+
+```typescript
+const res = await fetch(
+  `https://api.procurenet.io/api/v7/sessions/${sessionId}/escrow-accept`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${jwtToken}`,
+      'Content-Type': 'application/json'
+    }
+  }
+);
+
+if (res.ok) {
+  console.log('Escrow accepted, session advancing to funded state');
+}
+```
+
+### ProcureNet Writes the Audit Trail Entry
+
+Immediately upon acceptance, ProcureNet records an immutable audit trail entry capturing the session ID, accepting party identity, timestamp, and transaction details. This entry is written before the session advances and cannot be modified or deleted.
+
+### Session Advances to `funded`
+
+After the audit trail is written, ProcureNet transitions the session to the `funded` state and resumes the orchestration flow. Your session stream will emit the new state.
+
+</Steps>
+
+## Authorization Requirements
+
+<Note>
+  Only the authorized buyer or a delegated party holding a valid JWT with escrow acceptance permissions can call `POST /api/v7/sessions/{id}/escrow-accept`. Calls with an unauthorized or expired JWT return `403 Forbidden`.
+</Note>
+
+Ensure your JWT is issued with the correct claims before calling this endpoint. If you are delegating escrow acceptance to a procurement agent or system account, verify that the delegated JWT has the `escrow:accept` scope.
+
+<Warning>
+  Escrow acceptance is irreversible. Once you call the endpoint, the audit trail entry is written and the session advances. There is no undo operation — if you need to stop the transaction after acceptance, you must raise a support ticket for manual escalation.
+</Warning>
+
+## Frequently Asked Questions
+
+<Accordion title="What counts as a high-value transaction?">
+  The threshold is defined by your account's transaction threshold policy and is set during account configuration. ProcureNet compares the session's `amount` field against this threshold to determine whether to enter the `escrow_pending` state. Contact ProcureNet support to review or request a change to your account's threshold.
+</Accordion>
+
+<Accordion title="Can I cancel after escrow is accepted?">
+  No. Once escrow is accepted, the session must proceed to completion. The audit trail entry is immutable and the session state cannot be rolled back programmatically. If you need to halt the transaction after acceptance, contact ProcureNet support to raise a manual escalation ticket — the support team can intervene before funds are fully committed.
+</Accordion>
+
+<Accordion title="What happens if the escrow-accept call fails?">
+  If the endpoint returns a non-2xx response, the session remains in `escrow_pending` and no audit trail entry is written. Retry the call after resolving the issue (for example, refreshing an expired JWT). The session will not time out of `escrow_pending` automatically unless your account has an inactivity policy configured.
+</Accordion>
+
+<Accordion title="Can I automate escrow acceptance?">
+  Yes. You can call `POST /api/v7/sessions/{id}/escrow-accept` from a server-side service as long as the request includes a valid JWT with the appropriate permissions. Ensure your automated system includes adequate review logic before accepting — the acceptance is irreversible.
+</Accordion>
