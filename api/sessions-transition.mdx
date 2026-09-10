@@ -1,10 +1,10 @@
 ---
 title: "POST /api/v7/sessions/{id}/transition — Advance State"
 sidebarTitle: "POST /transition"
-description: "Advance a session through the procurement state machine. Illegal moves return deterministic error codes. Every call emits an observability pipeline event."
+description: "Advance a session through the procurement state machine. Illegal moves return deterministic error codes. Every transition emits a timestamped audit event."
 ---
 
-ProcureNet manages each procurement session as a strict state machine. Calling this endpoint moves the session forward to a target state you specify. The engine validates that the transition is permitted from the session's current state — if it isn't, you receive a deterministic `400` error with a machine-readable rejection code so your integration can handle it without guesswork. Every successful transition also emits an event to the observability pipeline, giving you a complete, timestamped audit trail of how a session progressed.
+ProcureNet manages each procurement session as a strict state machine. Calling this endpoint moves the session forward to a target state you specify. The engine validates that the transition is permitted from the session's current state — if it isn't, you receive a deterministic `400` error with a machine-readable rejection code so your integration can handle it without guesswork. Every successful transition also emits a timestamped audit event, giving you a complete, structured record of how a session progressed.
 
 ## Authentication
 
@@ -79,7 +79,7 @@ const result = await res.json();
 </ResponseField>
 
 <ResponseField name="transitioned_at" type="string" required>
-  ISO 8601 timestamp of when the transition was recorded. This is the same timestamp written to the observability pipeline event.
+  ISO 8601 timestamp of when the transition was recorded. This is the same timestamp written to the transition audit event.
 </ResponseField>
 
 ## Response Example
@@ -117,7 +117,7 @@ if (!res.ok) {
 ```
 
 <Info>
-  Every successful transition — and every rejected attempt — is emitted as a structured event to the ProcureNet observability pipeline. You can use these events to reconstruct the full lifecycle of any session for debugging or compliance purposes.
+  Every successful transition — and every rejected attempt — is emitted as a structured audit event. You can use these events to reconstruct the full lifecycle of any session for debugging or compliance purposes.
 </Info>
 
 ## Error Codes

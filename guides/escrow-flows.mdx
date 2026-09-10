@@ -1,5 +1,5 @@
 ---
-title: "Use Escrow Flows for High-Value Transactions"
+title: "Use Escrow Flows for High-Value Procurement Sessions"
 sidebarTitle: "Escrow Flows"
 description: "Trigger and accept ProcureNet escrow on high-value sessions to satisfy compliance requirements and generate an immutable procurement audit trail."
 ---
@@ -60,7 +60,7 @@ After the audit trail is written, ProcureNet transitions the session to the `fun
 ## Authorization Requirements
 
 <Note>
-  Only the authorized buyer or a delegated party holding a valid JWT with escrow acceptance permissions can call `POST /api/v7/sessions/{id}/escrow-accept`. Calls with an unauthorized or expired JWT return `403 Forbidden`.
+  Only the authorized buyer or a delegated party holding a valid Bearer JWT with escrow acceptance permissions can call `POST /api/v7/sessions/{id}/escrow-accept`. Calls with an unauthorized or expired JWT return `403 Forbidden`.
 </Note>
 
 Ensure your JWT is issued with the correct claims before calling this endpoint. If you are delegating escrow acceptance to a procurement agent or system account, verify that the delegated JWT has the `escrow:accept` scope.
@@ -84,5 +84,5 @@ Ensure your JWT is issued with the correct claims before calling this endpoint. 
 </Accordion>
 
 <Accordion title="Can I automate escrow acceptance?">
-  Yes. You can call `POST /api/v7/sessions/{id}/escrow-accept` from a server-side service as long as the request includes a valid JWT with the appropriate permissions. Ensure your automated system includes adequate review logic before accepting — the acceptance is irreversible.
+  Yes. You can call `POST /api/v7/sessions/{id}/escrow-accept` from a server-side service as long as the request includes a valid Bearer JWT with the appropriate permissions. Ensure your automated system includes adequate review logic before accepting — the acceptance is irreversible.
 </Accordion>

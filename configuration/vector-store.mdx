@@ -1,10 +1,10 @@
 ---
-title: "ProcureNet Local-First Vector Store Configuration"
+title: "ProcureNet Vector Store: Indexes and Buyer Data Flow"
 sidebarTitle: "Vector Store"
-description: "Understand how ProcureNet's four vector indexes — wcs_profiles, contract_rules, translations, and entitlements — drive AI lookups in your checkout flows."
+description: "Understand how ProcureNet's four vector indexes power buyer resolution, contract validation, localization, and entitlements in your checkout flows."
 ---
 
-ProcureNet uses a local-first vector store to power AI-driven lookups for buyer profiles, contract rules, translations, and entitlements. The store runs on-device alongside the OpenClaw agent swarm, meaning reads are low-latency and survive network interruptions. You do not write vectors yourself — the platform populates and queries the store automatically based on the data you supply to the orchestration API.
+ProcureNet uses a local-first vector store to power AI-driven lookups for buyer profiles, contract rules, translations, and entitlements. The store operates alongside the OpenClaw agent swarm, meaning reads are low-latency and survive network interruptions. You do not write vectors yourself — the platform populates and queries the store automatically based on the data you supply to the orchestration API.
 
 ## The Four Indexes
 
@@ -14,17 +14,17 @@ The vector store contains four named indexes. Each serves a distinct role in the
   <Card title="wcs_profiles" icon="user">
     **Type: `scoring`**
 
-    Stores embedding representations of buyer identity signals. Powers the Wallet Confidence Score engine to resolve sessions as `resolved`, `partial`, or `anonymous`.
+    Stores buyer identity signals used by the Wallet Confidence Score engine to resolve sessions as `resolved`, `partial`, or `anonymous`. The richer the identity data you pass to `/api/v7/orchestrate`, the more accurately this index can identify returning buyers.
   </Card>
   <Card title="contract_rules" icon="file-contract">
     **Type: `validation`**
 
-    Holds procurement contract terms and validation logic. Checked during state transitions to ensure orders comply with applicable rules before advancing.
+    Holds procurement contract terms and validation logic. Checked during state transitions to ensure orders comply with applicable rules before advancing to the next stage.
   </Card>
   <Card title="translations" icon="language">
     **Type: `i18n`**
 
-    Contains localized string embeddings for checkout UI flows. Enables ProcureNet to serve the correct language and locale to buyers without round-trips to a remote translation service.
+    Contains localized strings for checkout UI flows. Enables ProcureNet to serve the correct language and locale to buyers without round-trips to a remote translation service.
   </Card>
   <Card title="entitlements" icon="badge-check">
     **Type: `authorization`**
@@ -35,47 +35,15 @@ The vector store contains four named indexes. Each serves a distinct role in the
 
 ---
 
-## Vector Item Structure
-
-Every item stored in any index shares the same shape, defined in ProcureNet's internal schema.
-
-<ResponseField name="id" type="string" required>
-  A unique identifier for this vector item within its index.
-</ResponseField>
-
-<ResponseField name="vector" type="number[]" required>
-  The embedding float array produced by the index's configured embedding model.
-  Array length matches the `dimensions` value declared for that index.
-</ResponseField>
-
-<ResponseField name="payload" type="object" required>
-  Arbitrary metadata attached to the vector item. Shape varies by index type —
-  for example, `wcs_profiles` payloads contain buyer signal fields, while
-  `contract_rules` payloads contain rule predicates.
-</ResponseField>
-
-<ResponseField name="updatedAt" type="string (ISO 8601)" required>
-  Timestamp of the last write to this item. Used by the OpenClaw reliability
-  worker to detect stale entries and trigger re-embedding.
-</ResponseField>
-
-<ResponseField name="ttlSeconds" type="integer">
-  Optional expiry in seconds from `updatedAt`. When set, the item is
-  automatically evicted from the index once the TTL elapses. Commonly applied
-  to `wcs_profiles` items for short-lived anonymous sessions.
-</ResponseField>
-
----
-
 ## How Each Index Affects Your Integration
 
 The indexes work together as a pipeline. Understanding their roles helps you pass the right data at the right time.
 
 <Steps>
   <Step title="Buyer signals flow into wcs_profiles">
-    When you call `POST /api/v7/orchestrate`, ProcureNet embeds the identity
+    When you call `POST /api/v7/orchestrate`, ProcureNet uses the identity
     signals you supply in the `hints` object — `customerId`, `email`, `phone`,
-    and `deviceId` — and queries the `wcs_profiles` index to calculate the
+    and `deviceId` — to query the `wcs_profiles` index and calculate the
     Wallet Confidence Score. A richer profile means a higher score and a
     `resolved` session mode.
   </Step>
@@ -100,31 +68,31 @@ The indexes work together as a pipeline. Understanding their roles helps you pas
 
 ---
 
-## Schema Reference (Condensed)
+## Vector Item Fields
 
-The full index schema follows JSON Schema draft 2020-12. The abbreviated structure below shows the shape of each index object.
+Every item stored in any index shares the same shape. These fields are managed by ProcureNet — you reference them only when reading diagnostic output or support responses.
 
-```json JSON
-{
-  "indexes": {
-    "<index_name>": {
-      "name": "string",
-      "type": "i18n | validation | scoring | authorization",
-      "embeddingModel": "string",
-      "dimensions": 1536,
-      "items": [
-        {
-          "id": "string",
-          "vector": [0.021, -0.113, "..."],
-          "payload": {},
-          "updatedAt": "2025-01-15T10:30:00Z",
-          "ttlSeconds": 3600
-        }
-      ]
-    }
-  }
-}
-```
+<ResponseField name="id" type="string" required>
+  A unique identifier for this vector item within its index.
+</ResponseField>
+
+<ResponseField name="payload" type="object" required>
+  Metadata attached to the vector item. Shape varies by index type —
+  for example, `wcs_profiles` payloads contain buyer signal fields, while
+  `contract_rules` payloads contain rule predicates.
+</ResponseField>
+
+<ResponseField name="updatedAt" type="string (ISO 8601)" required>
+  Timestamp of the last write to this item.
+</ResponseField>
+
+<ResponseField name="ttlSeconds" type="integer">
+  Optional expiry in seconds from `updatedAt`. When set, the item is
+  automatically evicted from the index once the TTL elapses. Commonly applied
+  to `wcs_profiles` items for short-lived anonymous sessions.
+</ResponseField>
+
+---
 
 <Note>
   The vector store is managed internally by OpenClaw agents — you do not write vectors directly. Buyer data you pass to `POST /api/v7/orchestrate` is used to populate and query profiles automatically.

@@ -1,5 +1,5 @@
 ---
-title: "USDC Payment Settlement on EVM Networks"
+title: "ProcureNet USDC Payment Settlement on EVM Networks"
 sidebarTitle: "Payment Settlement"
 description: "Learn how ProcureNet settles payments in USDC across Base, Arbitrum, Polygon, and Ethereum, including field evaluator payout tiers."
 ---
@@ -77,7 +77,7 @@ Follow these steps to create and confirm a USDC payment.
 For field evaluation workflows, ProcureNet calculates the USDC payout automatically based on the evaluator's average quality score. You do not need to specify an amount manually — pass the evaluation results when creating the payment request and the bridge applies the correct tier.
 
 <Note>
-  Payments for field evaluations include GPS metadata from the evaluator's device when location data is available at sync time. This metadata is stored alongside the transaction record for audit purposes.
+  Payments for field evaluations are calculated automatically from the submitted evaluation results. You do not need to specify an amount manually — pass the evaluation data when creating the payment request and ProcureNet applies the correct payout tier.
 </Note>
 
 | Average Evaluation Score | USDC Payout |
@@ -88,7 +88,7 @@ For field evaluation workflows, ProcureNet calculates the USDC payout automatica
 | < 5.0 | 0 USDC |
 
 <Accordion title="How the tier is calculated">
-  The VCI bridge averages all evaluation scores submitted in a sync batch. If an evaluator submits five evaluations with scores of 8.5, 9.2, 7.8, 8.0, and 9.5, their average is 8.6 — which falls into the ≥ 7.0 tier and triggers a 250 USDC payout. The bridge computes this automatically; no manual tier selection is exposed via the API.
+  ProcureNet averages all evaluation scores submitted for an assignment. If an evaluator submits five evaluations with scores of 8.5, 9.2, 7.8, 8.0, and 9.5, their average is 8.6 — which falls into the ≥ 7.0 tier and triggers a 250 USDC payout. The platform computes this automatically; no manual tier selection is exposed via the API.
 </Accordion>
 
 ## Admin Manual Confirmation
@@ -97,9 +97,10 @@ In exceptional cases — such as on-chain delays or network congestion — an ad
 
 ```bash
 curl -X POST https://api.procurenet.io/mods/procurement_wallet/usdc/manual-confirm \
+  -H "x-perplexity-mod-key: <api_key>" \
   -H "x-admin-key: <admin_key>" \
   -H "Content-Type: application/json" \
-  -d '{ "payment_id": "pay_xyz", "transaction_hash": "0xabc..." }'
+  -d '{ "payment_id": "pay_xyz" }'
 ```
 
 <Warning>

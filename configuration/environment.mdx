@@ -1,7 +1,7 @@
 ---
-title: "Configure ProcureNet for Your Environment"
+title: "ProcureNet API Keys, Networks, and VCI Bridge Setup"
 sidebarTitle: "Environment"
-description: "Set up your API credentials, choose an EVM payment network, and tune the VCI bridge — everything you need to connect your app to ProcureNet."
+description: "Configure API credentials, payment networks, and VCI bridge options to connect your application to ProcureNet's orchestration API."
 ---
 
 ProcureNet exposes a set of configuration options you control through your account settings and API keys. This page covers the **customer-configurable** settings only — what you pass in API calls and set in your application. You will not need to touch any infrastructure; every option described here is a value you supply at initialization time or as an HTTP header.
@@ -66,7 +66,7 @@ The `VCIProcureNetBridge` connects your offline VCI evaluation queue to ProcureN
   When `true`, the bridge automatically polls for on-chain confirmation after
   creating a payment request — no extra calls needed from your side. Set to
   `false` if you want to control the confirmation check yourself by calling
-  `manualConfirmPayment()` explicitly.
+  `processWalletSettlement()` and `manualConfirmPayment()` explicitly.
 </ParamField>
 
 <ParamField body="tenantIdResolver" type="() => string" default="() => 'default-tenant'">

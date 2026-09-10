@@ -4,7 +4,7 @@ sidebarTitle: "GET /usdc/watch"
 description: "Poll an active USDC payment request for on-chain confirmation. Returns confirmed status and a transaction hash once the transfer is detected."
 ---
 
-After creating a USDC payment request, use the watch endpoint to check whether the corresponding on-chain transfer has been confirmed. You call this endpoint periodically, passing the `payment_id` returned by the create endpoint, until `confirmed` is `true`. When you initialize `ProcureNetWalletClient` with `autoWatch: true`, the `VCIProcureNetBridge` handles this polling loop automatically after every successful evaluation sync — you only need to call this endpoint directly when managing the polling lifecycle yourself.
+After creating a USDC payment request, use the watch endpoint to check whether the corresponding on-chain transfer has been confirmed. Call this endpoint periodically with the `payment_id` returned by the create endpoint until `confirmed` is `true`. When you initialize `ProcureNetWalletClient` with `autoWatch: true`, the client handles this polling loop automatically — you only need to call this endpoint directly when you want to manage the polling lifecycle yourself.
 
 ## Endpoint
 
@@ -23,7 +23,7 @@ x-perplexity-mod-key: <your-api-key>
 ## Path Parameters
 
 <ParamField path="paymentId" type="string" required>
-  The `payment_id` returned when you created the payment request via [`POST /usdc/request`](/api/usdc-request). This value is also stored in your queue record's metadata under the key `procurenet_payment_id` when using `VCIProcureNetBridge`.
+  The `payment_id` returned when you created the payment request via [`POST /usdc/request`](/api/usdc-request).
 </ParamField>
 
 ## Polling Behavior
@@ -31,14 +31,14 @@ x-perplexity-mod-key: <your-api-key>
 Call this endpoint on a fixed interval until the response includes `"confirmed": true`. A reasonable starting interval is every 10–15 seconds for `base` and `arbitrum` networks, and every 30–60 seconds for `ethereum` mainnet.
 
 <Note>
-  If `autoWatch: true` is set on your `ProcureNetWalletClient` instance, `VCIProcureNetBridge` automatically calls `watchPayment()` for you after initiating settlement. You do not need to poll manually in that case.
+  If `autoWatch: true` is set on your `ProcureNetWalletClient` instance, the client automatically calls `watchPayment()` after initiating a payment request. You do not need to poll manually in that case.
 </Note>
 
 ## Code Example
 
 <CodeGroup>
 ```typescript TypeScript
-import { ProcureNetWalletClient } from './integrations/VCIProcureNetBridge';
+import { ProcureNetWalletClient } from '@procurenet/wallet-sdk';
 
 const wallet = new ProcureNetWalletClient(
   'https://api.procurenet.io',
@@ -117,5 +117,5 @@ curl -X GET \
 | `404` | No payment found for the given `paymentId` |
 
 <Tip>
-  Once you receive `"confirmed": true`, update your internal records immediately. The `VCIProcureNetBridge` writes `status: "payment_confirmed"` and `tx_hash` back to the queue record automatically when using the bridge's built-in watch flow.
+  Once you receive `"confirmed": true`, record the `transaction_hash` in your own systems immediately for auditing and reconciliation purposes.
 </Tip>

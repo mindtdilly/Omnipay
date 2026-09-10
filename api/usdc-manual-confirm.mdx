@@ -4,7 +4,7 @@ sidebarTitle: "POST /manual-confirm"
 description: "Force-confirm a pending USDC payment request using elevated admin credentials. Use when autoWatch is disabled or automated confirmation has stalled."
 ---
 
-The manual confirmation endpoint lets an administrator force a USDC payment into confirmed status without waiting for the automated on-chain watch cycle. This is an elevated operation intended for operational recovery — use it when `autoWatch` is disabled on your `ProcureNetWalletClient`, when a payment has stalled due to network delays, or when you need to confirm a payment outside the normal polling window. The `VCIProcureNetBridge` exposes this via the `manualConfirmPayment()` method, which accepts a local queue record ID and resolves the associated `payment_id` automatically.
+The manual confirmation endpoint lets an administrator force a USDC payment into confirmed status without waiting for the automated on-chain watch cycle. This is an elevated operation intended for operational recovery — use it when `autoWatch` is disabled on your `ProcureNetWalletClient`, when a payment has stalled due to network delays, or when you need to confirm a payment outside the normal polling window. Both `x-perplexity-mod-key` and `x-admin-key` headers are required; this endpoint is not accessible with a mod key alone.
 
 ## Endpoint
 
@@ -28,18 +28,26 @@ x-admin-key: <your-admin-key>
 ## Request Body
 
 <ParamField body="payment_id" type="string" required>
-  The `payment_id` of the payment you want to manually confirm. You can retrieve this from the original create-request response, or from the queue record's metadata under the key `procurenet_payment_id` when using `VCIProcureNetBridge`.
+  The `payment_id` of the payment you want to manually confirm. You can retrieve this from the original create-request response.
 </ParamField>
 
 ## Code Example
 
 <CodeGroup>
-```typescript TypeScript
-import { VCIProcureNetBridge, ProcureNetWalletClient } from './integrations/VCIProcureNetBridge';
+```typescript TypeScript (Bridge)
+import { VCIProcureNetBridge, ProcureNetWalletClient } from '@procurenet/wallet-sdk';
 
-// Using VCIProcureNetBridge (resolves payment_id from queue record automatically)
+// Instantiate the wallet client and bridge
+const wallet = new ProcureNetWalletClient(
+  'https://api.procurenet.io',
+  process.env.PROCURENET_MOD_KEY!
+);
+
+const bridge = new VCIProcureNetBridge(queue, wallet);
+
+// manualConfirmPayment accepts a local record ID and admin key
 const result = await bridge.manualConfirmPayment(
-  localId,                   // local queue record ID (number)
+  localId,                    // local record ID (number)
   process.env.ADMIN_KEY!
 );
 
@@ -50,8 +58,8 @@ if (result.confirmed) {
 }
 ```
 
-```typescript Direct Client Call
-import { ProcureNetWalletClient } from './integrations/VCIProcureNetBridge';
+```typescript TypeScript (Direct Client)
+import { ProcureNetWalletClient } from '@procurenet/wallet-sdk';
 
 const wallet = new ProcureNetWalletClient(
   'https://api.procurenet.io',
@@ -81,13 +89,13 @@ curl -X POST https://api.procurenet.io/mods/procurement_wallet/usdc/manual-confi
 
 <CardGroup cols={2}>
   <Card title="autoWatch Disabled" icon="eye-slash">
-    If you initialized `ProcureNetWalletClient` with `autoWatch: false`, the bridge will not poll for on-chain confirmations. Use this endpoint to confirm payments after you have verified the transfer through an external source.
+    If you initialized `ProcureNetWalletClient` with `autoWatch: false`, the client will not poll for on-chain confirmations. Use this endpoint to confirm payments after you have verified the transfer through an external source.
   </Card>
   <Card title="Stalled Confirmation" icon="clock">
-    If a payment remains unconfirmed longer than expected — for example, due to network congestion on Ethereum mainnet — you can use this endpoint to unblock the settlement queue.
+    If a payment remains unconfirmed longer than expected — for example, due to network congestion on Ethereum mainnet — you can use this endpoint to unblock the settlement flow.
   </Card>
   <Card title="Operational Recovery" icon="wrench">
-    During incidents where the watch service is temporarily unavailable, you can replay confirmations for all affected payments using this endpoint from a secure admin context.
+    During incidents where the watch service is temporarily unavailable, you can replay confirmations for affected payments using this endpoint from a secure admin context.
   </Card>
   <Card title="Testing & Staging" icon="flask">
     In non-production environments where you are not routing real on-chain transfers, use manual confirmation to exercise the rest of your payment settlement workflow without waiting for blockchain activity.
@@ -113,19 +121,6 @@ curl -X POST https://api.procurenet.io/mods/procurement_wallet/usdc/manual-confi
 }
 ```
 
-## Bridge Behavior After Confirmation
-
-When you call `bridge.manualConfirmPayment()`, the bridge automatically writes back to the queue record on success:
-
-```typescript
-await this.queue.updateRecordMetadata(localId, {
-  status: 'payment_confirmed',
-  tx_hash: result.transaction_hash,
-});
-```
-
-This keeps your offline queue in sync with the confirmed payment state so downstream processes see the record as fully settled.
-
 ## Error Codes
 
 | Status | Meaning |
@@ -134,5 +129,5 @@ This keeps your offline queue in sync with the confirmed payment state so downst
 | `404` | No payment found for the given `payment_id` |
 
 <Info>
-  If you need to confirm payments in bulk — for example, to recover a batch of stalled evaluations — iterate over affected local queue records and call `bridge.manualConfirmPayment()` for each one. The bridge resolves `payment_id` for you from the queue metadata, so you only need the local record ID.
+  If you need to confirm multiple stalled payments in bulk, iterate over the affected payment IDs and call `wallet.manualConfirm(paymentId, adminKey)` for each one. Ensure your admin workflow logs each confirmation with a timestamp for your audit trail.
 </Info>

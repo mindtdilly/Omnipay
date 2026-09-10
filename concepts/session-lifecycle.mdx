@@ -1,5 +1,5 @@
 ---
-title: "ProcureNet Session Lifecycle and State Machine"
+title: "ProcureNet Session Lifecycle and State Transitions"
 sidebarTitle: "Session Lifecycle"
 description: "Understand how ProcureNet sessions progress through states from creation to completion, and how to drive each transition correctly."
 ---
@@ -45,7 +45,6 @@ Follow these steps to move a session from creation to completion.
 
     ```bash
     curl -X POST https://api.procurenet.io/api/v7/orchestrate \
-      -H "Authorization: Bearer <JWT>" \
       -H "Content-Type: application/json" \
       -d '{
         "hints": {

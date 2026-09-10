@@ -1,14 +1,14 @@
 ---
-title: "OpenClaw AI Agent Swarm Configuration Guide"
+title: "OpenClaw AI Agents: Security, Reliability, Diagnostics"
 sidebarTitle: "AI Agents"
-description: "Learn how ProcureNet's OpenClaw worker fleet handles security, reliability, and observability automatically — and what that means for your integration."
+description: "Learn how ProcureNet's OpenClaw workers handle webhook security, session reliability, and payment diagnostics automatically for your integration."
 ---
 
-ProcureNet's OpenClaw agent swarm runs a fleet of specialized AI workers that handle security, data reliability, observability, and procurement automation. These agents operate continuously in the background on your behalf — you do not invoke them directly or manage their lifecycle. Instead, you configure their behavior through settings in your integration and interpret the signals they surface, such as trace IDs and webhook retry outcomes.
+ProcureNet's OpenClaw agent swarm runs a fleet of specialized AI workers that handle security, data reliability, and observability on your behalf. These agents operate continuously in the background — you do not invoke them directly or manage their lifecycle. Instead, you configure their behavior through settings in your integration and interpret the signals they surface, such as trace IDs and webhook retry outcomes.
 
 ## Key Worker Classes
 
-OpenClaw currently runs 10+ worker classes. The three below have the most direct impact on your day-to-day integration.
+OpenClaw runs several worker classes. The three below have the most direct impact on your day-to-day integration.
 
 <CardGroup cols={3}>
   <Card title="claw-v1 — Security" icon="shield-halved">
@@ -63,8 +63,8 @@ OpenClaw currently runs 10+ worker classes. The three below have the most direct
 <Accordion title="Can I configure which agents run?">
   No. The OpenClaw agent swarm is fully managed by ProcureNet and runs
   automatically for every account. There is no option to enable or disable
-  individual workers. All 10+ worker classes are active on your sessions from
-  the moment you create them.
+  individual workers. All active worker classes are running on your sessions
+  from the moment you create them.
 </Accordion>
 
 <Accordion title="How do I know if an agent is failing?">
@@ -76,12 +76,11 @@ OpenClaw currently runs 10+ worker classes. The three below have the most direct
   exactly which worker encountered an error and when.
 </Accordion>
 
-<Accordion title="Are agent skills updated automatically?">
-  Yes. ProcureNet deploys agent skill updates as part of regular platform
-  releases. New capabilities are added to the 48-skill manifest without
-  changing any public API contract, so your integration does not need to be
-  modified when updates ship. You will see improvements in accuracy and
-  coverage automatically.
+<Accordion title="Are agent capabilities updated automatically?">
+  Yes. ProcureNet deploys agent updates as part of regular platform releases.
+  New capabilities are added without changing any public API contract, so your
+  integration does not need to be modified when updates ship. You will see
+  improvements in accuracy and coverage automatically.
 </Accordion>
 
 <Accordion title="What happens if an agent is temporarily unavailable?">
@@ -95,5 +94,5 @@ OpenClaw currently runs 10+ worker classes. The three below have the most direct
 ---
 
 <Note>
-  OpenClaw currently runs 10+ worker classes with a 48-skill manifest planned. New skills are deployed transparently — your integration code does not need to change to benefit from expanded agent capabilities as they roll out.
+  Agent updates are deployed transparently as part of regular ProcureNet platform releases. Your integration code does not need to change to benefit from expanded agent capabilities as they roll out.
 </Note>

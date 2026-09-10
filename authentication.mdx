@@ -1,7 +1,7 @@
 ---
 title: "How to Authenticate Every Request to ProcureNet APIs"
 sidebarTitle: "Authentication"
-description: "ProcureNet uses four credential types — mod keys, JWT bearer tokens, webhook HMAC signatures, and admin keys — each scoped to a specific part of the API."
+description: "ProcureNet uses four credential types — mod keys, JWT tokens, webhook HMAC signatures, and admin keys — each scoped to a specific part of the API."
 ---
 
 ProcureNet authenticates requests through four distinct mechanisms, each scoped to a different surface of the API. Wallet and payment endpoints use a mod key passed as a custom header. Session endpoints require a JWT bearer token. Inbound webhooks from Procurement Express carry an HMAC signature you must verify before processing. Admin override endpoints require a separate admin key. Understanding which credential applies where prevents auth failures and keeps your integration secure.

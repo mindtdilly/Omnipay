@@ -1,10 +1,10 @@
 ---
-title: "POST /api/v7/sessions/{id}/funding-method"
+title: "Funding Method — Bind Payment to Procurement Session"
 sidebarTitle: "POST /funding-method"
 description: "Bind a payment method to an active procurement session. Accepts USDC on-chain, card, or bank transfer. Replaces the deprecated POST /api/payments/route."
 ---
 
-Once a procurement session is ready for payment, this endpoint binds a funding method to it. You specify the method type — USDC, card, or bank transfer — and for USDC payments, the target blockchain network. ProcureNet validates the combination against the session's state and the buyer's entitlements stored in the local vector store, then advances the session toward payment processing. This endpoint replaces the deprecated `POST /api/payments/route` — if your integration still uses that path, follow the migration guidance at the bottom of this page.
+Once a procurement session is ready for payment, this endpoint binds a funding method to it. You specify the method type — USDC, card, or bank transfer — and for USDC payments, the target blockchain network. ProcureNet validates the combination against the session's state and the buyer's entitlements, then advances the session toward payment processing. This endpoint replaces the deprecated `POST /api/payments/route` — if your integration still uses that path, follow the migration guidance at the bottom of this page.
 
 ## Authentication
 

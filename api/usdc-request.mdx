@@ -4,7 +4,7 @@ sidebarTitle: "POST /usdc/request"
 description: "Initiate an on-chain USDC payment request for a tenant. Returns a deposit address, optional QR code, and a payment_id to track confirmation."
 ---
 
-The USDC payment request endpoint creates an on-chain payment instruction for a specific tenant and amount. When a field evaluator's offline evaluation syncs successfully, `VCIProcureNetBridge` calls this endpoint automatically to initiate settlement. You can also call it directly to request payment outside of the automated sync flow. Each response includes a `payment_id` you can pass to the watch or manual-confirm endpoints to track the transaction's on-chain status.
+The USDC payment request endpoint creates an on-chain payment instruction for a specific tenant and amount. Call this endpoint whenever you need to initiate a USDC settlement — for example, after a procurement evaluation completes or when issuing a direct payment. The response includes a `payment_id` that you pass to the watch or manual-confirm endpoints to track the transaction's on-chain status. Each payment request targets a single blockchain network and expires if the corresponding on-chain transfer is not confirmed within the allotted window.
 
 ## Endpoint
 
@@ -27,14 +27,14 @@ x-perplexity-mod-key: <your-api-key>
 </ParamField>
 
 <ParamField body="amount_usdc" type="number" required>
-  Payment amount in USDC. Must be a positive number. The `VCIProcureNetBridge` derives this automatically from the evaluator's average score using the following tiers:
+  Payment amount in USDC. Must be a positive number. ProcureNet's VCI payment tiers determine the appropriate amount based on average evaluation score:
 
-  | Average Score | Payment |
+  | Average Score | Payment Amount |
   |---|---|
   | ≥ 9.0 | 500 USDC |
   | ≥ 7.0 | 250 USDC |
   | ≥ 5.0 | 100 USDC |
-  | < 5.0 | 0 USDC (no payment created) |
+  | < 5.0 | 0 USDC (no payment initiated) |
 </ParamField>
 
 <ParamField body="network" type="string" required>
@@ -46,20 +46,18 @@ x-perplexity-mod-key: <your-api-key>
 </ParamField>
 
 <ParamField body="memo" type="string" required>
-  A human-readable description attached to the payment. For VCI evaluations, the bridge generates this automatically in the format `VCI Eval: <assignmentId> | Score: <avg>`.
+  A human-readable description attached to the payment. Use this to identify the purpose of the payment, such as a reference number or a brief note about the transaction.
 </ParamField>
 
 <ParamField body="metadata" type="object">
-  Arbitrary key-value pairs attached to the payment record. Use this field to link the payment back to your internal records — for example, an evaluator ID, assignment ID, or GPS snapshot. Keys and values must be JSON-serializable.
+  Arbitrary key-value pairs attached to the payment record. Use this field to link the payment back to your internal records. Keys and values must be JSON-serializable.
 
-  <Expandable title="Common metadata keys">
+  <Expandable title="Example metadata keys">
     | Key | Type | Description |
     |---|---|---|
     | `evaluator_id` | string | Your internal evaluator identifier |
     | `assignment_id` | string | The assignment this payment covers |
-    | `vci_local_id` | number | Local offline queue record ID |
-    | `gps` | object | GPS snapshot at time of evaluation |
-    | `submitted_at` | string | ISO 8601 timestamp of offline submission |
+    | `submitted_at` | string | ISO 8601 timestamp of submission |
   </Expandable>
 </ParamField>
 
@@ -67,7 +65,7 @@ x-perplexity-mod-key: <your-api-key>
 
 <CodeGroup>
 ```typescript TypeScript
-import { ProcureNetWalletClient } from './integrations/VCIProcureNetBridge';
+import { ProcureNetWalletClient } from '@procurenet/wallet-sdk';
 
 const wallet = new ProcureNetWalletClient(
   'https://api.procurenet.io',
@@ -80,7 +78,7 @@ const payment = await wallet.createUSDCPayment({
   amount_usdc: 250,
   network: 'base',
   token: 'USDC',
-  memo: 'VCI Eval: assign_789 | Score: 7.50',
+  memo: 'Procurement evaluation — assignment assign_789',
   metadata: {
     evaluator_id: 'eval_456',
     assignment_id: 'assign_789'
@@ -101,7 +99,7 @@ curl -X POST https://api.procurenet.io/mods/procurement_wallet/usdc/request \
     "amount_usdc": 250,
     "network": "base",
     "token": "USDC",
-    "memo": "VCI Eval: assign_789 | Score: 7.50",
+    "memo": "Procurement evaluation — assignment assign_789",
     "metadata": {
       "evaluator_id": "eval_456",
       "assignment_id": "assign_789"
@@ -113,7 +111,7 @@ curl -X POST https://api.procurenet.io/mods/procurement_wallet/usdc/request \
 ## Response
 
 <ResponseField name="payment_id" type="string" required>
-  Unique identifier for this payment request. Pass this value to [`GET /usdc/watch/{paymentId}`](/api/usdc-watch) to poll confirmation, or to [`POST /usdc/manual-confirm`](/api/usdc-manual-confirm) to force-confirm.
+  Unique identifier for this payment request. Pass this value to [`GET /usdc/watch/{paymentId}`](/api/usdc-watch) to poll for confirmation, or to [`POST /usdc/manual-confirm`](/api/usdc-manual-confirm) to force-confirm.
 </ResponseField>
 
 <ResponseField name="deposit_address" type="string" required>
@@ -121,7 +119,7 @@ curl -X POST https://api.procurenet.io/mods/procurement_wallet/usdc/request \
 </ResponseField>
 
 <ResponseField name="qr_code" type="string">
-  A data URI containing a QR code image for the deposit address. Render this in your UI so evaluators can scan and pay directly from a mobile wallet.
+  A data URI containing a QR code image for the deposit address. Render this in your UI so payers can scan and transfer directly from a mobile wallet.
 </ResponseField>
 
 <ResponseField name="expires_at" type="string">
@@ -148,5 +146,5 @@ curl -X POST https://api.procurenet.io/mods/procurement_wallet/usdc/request \
 | `422` | `tenant_id` does not match a registered ProcureNet tenant |
 
 <Tip>
-  Store `payment_id` and `deposit_address` in your queue metadata immediately after a successful response. The `VCIProcureNetBridge` does this automatically via `queue.updateRecordMetadata()`.
+  Store `payment_id` and `deposit_address` from the response immediately after a successful request. Pass `payment_id` to the watch endpoint to begin polling for on-chain confirmation.
 </Tip>

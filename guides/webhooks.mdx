@@ -1,5 +1,5 @@
 ---
-title: "Receive Procurement Approval Webhooks Securely"
+title: "Receive and Verify Procurement Approval Webhooks Securely"
 sidebarTitle: "Webhooks"
 description: "Verify HMAC-signed Procurement Express callbacks and use approval decisions to resume or terminate your orchestration sessions in real time."
 ---
@@ -42,31 +42,68 @@ export WEBHOOK_SECRET=your_webhook_secret_here
 
 In ProcureNet settings, add your server's public URL as a Procurement Express callback target. ProcureNet will `POST` to this URL for every approval decision event.
 
+### Configure Raw Body Parsing
+
+HMAC verification requires the **raw, unparsed request body bytes**. You must configure your framework to capture the raw body before any JSON parsing middleware runs. In Express, use `express.raw()` — not `express.json()` — for your webhook route.
+
+<Warning>
+  Do not use `express.json()` (or any body-parsing middleware that parses JSON) on your webhook route. Parsing and re-serializing the body can alter field ordering or whitespace, causing your computed HMAC to differ from ProcureNet's. Use `express.raw({ type: 'application/json' })` to capture the raw bytes before any parsing occurs.
+</Warning>
+
+```typescript
+import express from 'express';
+
+const app = express();
+
+// Use raw body parsing ONLY for the webhook route
+app.post(
+  '/webhooks/procurement',
+  express.raw({ type: 'application/json' }),
+  (req, res) => {
+    // req.body is now a Buffer containing the raw bytes
+  }
+);
+```
+
 ### Implement HMAC Verification
 
 For every inbound request, compute the expected HMAC signature from the raw request body using your webhook secret and compare it to the `x-procure-signature` header. Reject any request where they do not match.
 
 ```typescript
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
-function verifySignature(payload: string, signature: string, secret: string): boolean {
-  const expected = createHmac('sha256', secret).update(payload).digest('hex');
-  return `sha256=${expected}` === signature;
+function verifySignature(rawBody: Buffer, signature: string, secret: string): boolean {
+  const expected = 'sha256=' + createHmac('sha256', secret).update(rawBody).digest('hex');
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  const signatureBuf = Buffer.from(signature, 'utf8');
+  if (expectedBuf.length !== signatureBuf.length) return false;
+  return timingSafeEqual(expectedBuf, signatureBuf);
 }
 
-// In your webhook handler:
-app.post('/webhooks/procurement', (req, res) => {
-  const signature = req.headers['x-procure-signature'] as string;
-  const rawBody = JSON.stringify(req.body);
+app.post(
+  '/webhooks/procurement',
+  express.raw({ type: 'application/json' }),
+  (req, res) => {
+    const signature = req.headers['x-procure-signature'] as string;
 
-  if (!verifySignature(rawBody, signature, process.env.WEBHOOK_SECRET!)) {
-    return res.status(401).send('Invalid signature');
+    if (!verifySignature(req.body as Buffer, signature, process.env.WEBHOOK_SECRET!)) {
+      return res.status(401).send('Invalid signature');
+    }
+
+    const payload = JSON.parse((req.body as Buffer).toString('utf8'));
+    const { session_id, decision, actor, reason } = payload;
+
+    if (decision === 'approved') {
+      // Resume the orchestration session
+      resumeSession(session_id);
+    } else if (decision === 'rejected') {
+      // Terminate session and surface the reason to the buyer
+      cancelSession(session_id, reason);
+    }
+
+    res.status(204).send();
   }
-
-  const { session_id, decision, actor } = req.body;
-  // Resume or cancel the orchestration flow based on the decision
-  res.status(204).send();
-});
+);
 ```
 
 <Warning>
@@ -85,43 +122,49 @@ Respond with `204 No Content` after successfully processing the webhook. Procure
   An `"approved"` decision resumes a suspended orchestration flow — call `POST /api/v7/sessions/{id}/transition` with the appropriate event to continue. A `"rejected"` decision terminates the session; clean up any pending UI state and notify the buyer.
 </Note>
 
-Use the `decision` field to branch your handler logic:
+Use the `decision` field to branch your handler logic. The complete handler combining verification and decision routing looks like this:
 
 ```typescript
-app.post('/webhooks/procurement', (req, res) => {
-  const signature = req.headers['x-procure-signature'] as string;
-  const rawBody = JSON.stringify(req.body);
+app.post(
+  '/webhooks/procurement',
+  express.raw({ type: 'application/json' }),
+  (req, res) => {
+    const signature = req.headers['x-procure-signature'] as string;
 
-  if (!verifySignature(rawBody, signature, process.env.WEBHOOK_SECRET!)) {
-    return res.status(401).send('Invalid signature');
+    if (!verifySignature(req.body as Buffer, signature, process.env.WEBHOOK_SECRET!)) {
+      return res.status(401).send('Invalid signature');
+    }
+
+    const { session_id, decision, actor, reason } = JSON.parse(
+      (req.body as Buffer).toString('utf8')
+    );
+
+    if (decision === 'approved') {
+      resumeSession(session_id);
+    } else if (decision === 'rejected') {
+      cancelSession(session_id, reason);
+    }
+
+    res.status(204).send();
   }
-
-  const { session_id, decision, actor, reason } = req.body;
-
-  if (decision === 'approved') {
-    // Resume the orchestration session
-    resumeSession(session_id);
-  } else if (decision === 'rejected') {
-    // Terminate session and surface the reason to the buyer
-    cancelSession(session_id, reason);
-  }
-
-  res.status(204).send();
-});
+);
 ```
 
 ## Signature Verification Reference
 
-The `x-procure-signature` header uses the format `sha256=<hex_digest>`. ProcureNet computes the HMAC-SHA256 of the raw JSON request body using your webhook secret. Your verification must use the **raw body bytes** — do not parse and re-serialize the JSON before computing the digest, as field ordering or whitespace differences will cause a mismatch.
+The `x-procure-signature` header uses the format `sha256=<hex_digest>`. ProcureNet computes the HMAC-SHA256 of the raw JSON request body using your webhook secret. Your verification must use the **raw body bytes** — do not parse and re-serialize the JSON before computing the digest, as field ordering or whitespace differences will cause a mismatch. Use a timing-safe comparison to prevent timing-based attacks.
 
 <CodeGroup>
 
 ```typescript TypeScript
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
-function verifySignature(payload: string, signature: string, secret: string): boolean {
-  const expected = createHmac('sha256', secret).update(payload).digest('hex');
-  return `sha256=${expected}` === signature;
+function verifySignature(rawBody: Buffer, signature: string, secret: string): boolean {
+  const expected = 'sha256=' + createHmac('sha256', secret).update(rawBody).digest('hex');
+  const expectedBuf = Buffer.from(expected, 'utf8');
+  const signatureBuf = Buffer.from(signature, 'utf8');
+  if (expectedBuf.length !== signatureBuf.length) return false;
+  return timingSafeEqual(expectedBuf, signatureBuf);
 }
 ```
 
@@ -129,9 +172,9 @@ function verifySignature(payload: string, signature: string, secret: string): bo
 import hmac
 import hashlib
 
-def verify_signature(payload: str, signature: str, secret: str) -> bool:
+def verify_signature(raw_body: bytes, signature: str, secret: str) -> bool:
     expected = 'sha256=' + hmac.new(
-        secret.encode(), payload.encode(), hashlib.sha256
+        secret.encode(), raw_body, hashlib.sha256
     ).hexdigest()
     return hmac.compare_digest(expected, signature)
 ```
