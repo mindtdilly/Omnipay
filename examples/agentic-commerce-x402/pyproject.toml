@@ -1,0 +1,29 @@
+[project]
+name = "omnipay-x402"
+version = "0.1.0"
+description = "Local-only x402 agentic commerce simulation for Omnipay / ProcureNet docs"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "httpx>=0.28.0,<1",
+  "pydantic>=2.13.0,<3",
+]
+license = { text = "MIT AND Apache-2.0" }
+readme = "README.md"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4.0,<9",
+]
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/omnipay_x402"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
