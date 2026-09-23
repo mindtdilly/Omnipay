@@ -36,7 +36,8 @@
               "guides/integrate-checkout",
               "guides/field-evaluation-payments",
               "guides/webhooks",
-              "guides/escrow-flows"
+              "guides/escrow-flows",
+              "guides/agentic-commerce-x402"
             ]
           },
           {
