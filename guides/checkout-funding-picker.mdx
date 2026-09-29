@@ -10,16 +10,18 @@ This repository includes a self-contained funding-method picker under `examples/
 
 | Method | UI | Request body |
 |---|---|---|
-| `usdc` | Network select (`base`, `arbitrum`, `polygon`, `ethereum`) | `{ method, network }` |
-| `card` | Method selection only | `{ method: "card" }` |
-| `bank_transfer` | Routing number, account number, account type, account holder name | Full ACH fields |
-| `eth_wallet` | Wallet address, optional ENS, network (default `ethereum`) | `{ method, wallet_address, network, ens_name? }` |
+| `usdc` | Network select (`base`, `arbitrum`, `polygon`, `ethereum`) | `{ method, network, fee_* }` |
+| `card` | Method selection only | `{ method: "card", fee_* }` |
+| `bank_transfer` | Routing number, account number, account type, account holder name | Full ACH fields + `fee_*` |
+| `eth_wallet` | Wallet address, optional ENS, network (default `ethereum`) | `{ method, wallet_address, network, ens_name?, fee_* }` |
+
+Every live POST / preview body includes a **platform fee** by default: `fee_bps: 100` (1%) and `fee_recipient` (default `0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778`, overridable in config). The UI shows a fee line (`1% → 0xD0Fb…b778`) and an optional amount field for an estimated fee (1% of amount).
 
 The demo validates ACH and ETH fields client-side (ABA check digit; `0x` + 40 hex address), previews the JSON body, and can **POST live** to your API base URL with a Bearer JWT.
 
 ## Config
 
-Enter API base URL (default `https://api.procurenet.io`), Bearer JWT, and Session ID in the UI. Values persist in `localStorage` under `pn.checkoutFunding.*`. Enable **Preview only** to skip the network call. An empty JWT blocks live submit with a clear error — no secrets are hardcoded.
+Enter API base URL (default `https://api.procurenet.io`), Bearer JWT, Session ID, and optional **fee recipient** override in the UI. Values persist in `localStorage` under `pn.checkoutFunding.*` (including `pn.checkoutFunding.feeRecipient`). Enable **Preview only** to skip the network call. An empty JWT blocks live submit with a clear error — no secrets are hardcoded.
 
 ## Run the demo
 
