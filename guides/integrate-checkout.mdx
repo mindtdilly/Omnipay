@@ -124,24 +124,72 @@ const prefillData = await prefillRes.json();
 
 ### Set the Funding Method
 
-Once the buyer has selected a payment method, register it against the session by calling `POST /api/v7/sessions/{id}/funding-method`. This endpoint requires a Bearer JWT.
+Once the buyer has selected a payment method, register it against the session by calling `POST /api/v7/sessions/{id}/funding-method`. This endpoint requires a Bearer JWT. Supported methods are `usdc` (with `network`), `card`, and `bank_transfer` (ACH).
 
-```typescript
-const fundingRes = await fetch(
-  `https://api.procurenet.io/api/v7/sessions/${session_id}/funding-method`,
-  {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      type: 'card',
-      token: 'pm_tok_visa_4242'
-    })
-  }
-);
-```
+See [POST /funding-method](/api/sessions-funding-method) for the full field reference. A static funding-method picker demo lives at `examples/checkout-funding-picker/` in the docs repo.
+
+<Tabs>
+  <Tab title="USDC">
+    ```typescript
+    const fundingRes = await fetch(
+      `https://api.procurenet.io/api/v7/sessions/${session_id}/funding-method`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          method: 'usdc',
+          network: 'base' // base | arbitrum | polygon | ethereum
+        })
+      }
+    );
+    ```
+  </Tab>
+  <Tab title="Card">
+    ```typescript
+    const fundingRes = await fetch(
+      `https://api.procurenet.io/api/v7/sessions/${session_id}/funding-method`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          method: 'card'
+        })
+      }
+    );
+    ```
+  </Tab>
+  <Tab title="ACH (bank_transfer)">
+    ```typescript
+    const fundingRes = await fetch(
+      `https://api.procurenet.io/api/v7/sessions/${session_id}/funding-method`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          method: 'bank_transfer',
+          routing_number: '021000021',       // ABA, 9 digits (string)
+          account_number: '123456789012',
+          account_type: 'checking',          // checking | savings
+          account_holder_name: 'Acme Procurement LLC'
+        })
+      }
+    );
+    ```
+
+    <Note>
+      Always send `routing_number` and `account_number` as strings so leading zeros are preserved. Full account numbers are never returned in responses — only `routing_number_last4` and `account_number_last4`.
+    </Note>
+  </Tab>
+</Tabs>
 
 ### Advance Through Session States
 
