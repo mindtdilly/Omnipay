@@ -11,6 +11,8 @@ Supports:
 
 On submit, the page validates client-side (ABA check digit for ACH; basic hex address for ETH), shows the request JSON, and by default performs a **live** `fetch` POST. Enable **Preview only** to skip the network call.
 
+Every request body includes a **platform fee** by default: `fee_bps: 100` (1%) and `fee_recipient` (hardcoded platform default `0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778`, overridable in config). The UI shows a fee line and an optional amount field for estimated fee display.
+
 ## Config (localStorage)
 
 | Field | localStorage key | Default |
@@ -18,9 +20,10 @@ On submit, the page validates client-side (ABA check digit for ACH; basic hex ad
 | API base URL | `pn.checkoutFunding.apiBase` | `https://api.procurenet.io` |
 | Bearer JWT | `pn.checkoutFunding.jwt` | _(empty)_ |
 | Session ID | `pn.checkoutFunding.sessionId` | `sess_demo_001` |
+| Fee recipient | `pn.checkoutFunding.feeRecipient` | `0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778` |
 | Preview only | `pn.checkoutFunding.previewOnly` | `0` (live POST) |
 
-Live submit requires a non-empty JWT (`Authorization: Bearer …` + `Content-Type: application/json`). An empty token shows a clear error and does not call the API. No secrets are hardcoded.
+Live submit requires a non-empty JWT (`Authorization: Bearer …` + `Content-Type: application/json`). An empty token shows a clear error and does not call the API. No secrets are hardcoded (JWT empty by default; fee recipient is the public platform wallet).
 
 The response panel shows HTTP status and body (JSON pretty-printed when possible; raw text otherwise). Network failures are surfaced in the UI.
 

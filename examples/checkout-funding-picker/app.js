@@ -1,12 +1,17 @@
 (function () {
   const DEFAULT_API_BASE = 'https://api.procurenet.io';
   const DEFAULT_SESSION_ID = 'sess_demo_001';
+  // Platform default fee recipient (Architect / ProcureNet) — hardcoded DEFAULT
+  const DEFAULT_FEE_RECIPIENT = '0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778';
+  const DEFAULT_FEE_BPS = 100; // 1%
 
   const LS = {
     apiBase: 'pn.checkoutFunding.apiBase',
     jwt: 'pn.checkoutFunding.jwt',
     sessionId: 'pn.checkoutFunding.sessionId',
     previewOnly: 'pn.checkoutFunding.previewOnly',
+    feeRecipient: 'pn.checkoutFunding.feeRecipient',
+    feeAsset: 'pn.checkoutFunding.feeAsset',
   };
 
   const methodInputs = document.querySelectorAll('input[name="method"]');
@@ -22,18 +27,31 @@
   const bearerJwtInput = document.getElementById('bearerJwt');
   const sessionIdInput = document.getElementById('sessionId');
   const previewOnlyInput = document.getElementById('previewOnly');
+  const feeRecipientInput = document.getElementById('feeRecipient');
+  const feeAssetInput = document.getElementById('feeAsset');
+  const amountInput = document.getElementById('amount');
+  const feeLineText = document.getElementById('feeLineText');
+  const feeEstimate = document.getElementById('feeEstimate');
   const responseBadge = document.getElementById('responseBadge');
   const responseMeta = document.getElementById('responseMeta');
   const responseOut = document.getElementById('responseOut');
   const requestHint = document.getElementById('requestHint');
+
+  function truncateAddress(addr) {
+    if (!addr || addr.length < 10) return addr || '';
+    return addr.slice(0, 6) + '…' + addr.slice(-4);
+  }
 
   function loadConfig() {
     apiBaseInput.value = localStorage.getItem(LS.apiBase) || DEFAULT_API_BASE;
     bearerJwtInput.value = localStorage.getItem(LS.jwt) || '';
     sessionIdInput.value = localStorage.getItem(LS.sessionId) || DEFAULT_SESSION_ID;
     previewOnlyInput.checked = localStorage.getItem(LS.previewOnly) === '1';
+    feeRecipientInput.value = localStorage.getItem(LS.feeRecipient) || DEFAULT_FEE_RECIPIENT;
+    feeAssetInput.value = localStorage.getItem(LS.feeAsset) || 'usdc';
     syncEndpoint();
     syncSubmitLabel();
+    syncFeeLine();
   }
 
   function persistConfig() {
@@ -41,6 +59,9 @@
     localStorage.setItem(LS.jwt, bearerJwtInput.value.trim());
     localStorage.setItem(LS.sessionId, sessionIdInput.value.trim() || DEFAULT_SESSION_ID);
     localStorage.setItem(LS.previewOnly, previewOnlyInput.checked ? '1' : '0');
+    const fr = feeRecipientInput.value.trim() || DEFAULT_FEE_RECIPIENT;
+    localStorage.setItem(LS.feeRecipient, fr);
+    localStorage.setItem(LS.feeAsset, feeAssetInput.value === 'eth' ? 'eth' : 'usdc');
   }
 
   function getConfig() {
@@ -48,7 +69,25 @@
     const jwt = bearerJwtInput.value.trim();
     const sessionId = sessionIdInput.value.trim() || DEFAULT_SESSION_ID;
     const previewOnly = previewOnlyInput.checked;
-    return { apiBase, jwt, sessionId, previewOnly };
+    const feeRecipient = feeRecipientInput.value.trim() || DEFAULT_FEE_RECIPIENT;
+    const feeAsset = feeAssetInput.value === 'eth' ? 'eth' : 'usdc';
+    const amountRaw = amountInput.value.trim();
+    return { apiBase, jwt, sessionId, previewOnly, feeRecipient, feeAsset, amountRaw };
+  }
+
+  function syncFeeLine() {
+    const { feeRecipient, amountRaw } = getConfig();
+    feeLineText.textContent = '1% → ' + truncateAddress(feeRecipient);
+    feeLineText.title = feeRecipient;
+    const amount = parseFloat(amountRaw);
+    if (amountRaw && Number.isFinite(amount) && amount >= 0) {
+      const fee = (amount * DEFAULT_FEE_BPS) / 10000;
+      feeEstimate.hidden = false;
+      feeEstimate.textContent = 'Est. fee: ' + fee.toFixed(4) + ' (1% of ' + amount + ')';
+    } else {
+      feeEstimate.hidden = true;
+      feeEstimate.textContent = '';
+    }
   }
 
   function syncEndpoint() {
@@ -113,17 +152,31 @@
     return sum % 10 === 0;
   }
 
+  function attachPlatformFee(body) {
+    const { feeRecipient, feeAsset } = getConfig();
+    if (!isValidEthAddress(feeRecipient)) {
+      return {
+        ok: false,
+        error: 'fee_recipient must be 0x followed by exactly 40 hex characters (non-zero).',
+      };
+    }
+    body.fee_bps = DEFAULT_FEE_BPS;
+    body.fee_recipient = feeRecipient;
+    body.fee_asset = feeAsset;
+    return { ok: true, body };
+  }
+
   function buildBody() {
     const method = selectedMethod();
     const body = { method };
 
     if (method === 'usdc') {
       body.network = document.getElementById('network').value;
-      return { ok: true, body };
+      return attachPlatformFee(body);
     }
 
     if (method === 'card') {
-      return { ok: true, body };
+      return attachPlatformFee(body);
     }
 
     if (method === 'eth_wallet') {
@@ -151,7 +204,7 @@
       body.wallet_address = wallet_address;
       body.network = network;
       if (ens_name) body.ens_name = ens_name;
-      return { ok: true, body };
+      return attachPlatformFee(body);
     }
 
     const routing_number = document.getElementById('routing_number').value.trim();
@@ -187,7 +240,7 @@
     body.account_number = account_number;
     body.account_type = account_type;
     body.account_holder_name = account_holder_name;
-    return { ok: true, body };
+    return attachPlatformFee(body);
   }
 
   function resetResponse() {
@@ -313,14 +366,20 @@
     });
   });
 
-  [apiBaseInput, bearerJwtInput, sessionIdInput].forEach((el) => {
+  [apiBaseInput, bearerJwtInput, sessionIdInput, feeRecipientInput, feeAssetInput].forEach((el) => {
     el.addEventListener('change', () => {
       persistConfig();
       syncEndpoint();
+      syncFeeLine();
     });
     el.addEventListener('input', () => {
       if (el === sessionIdInput || el === apiBaseInput) syncEndpoint();
+      if (el === feeRecipientInput) syncFeeLine();
     });
+  });
+
+  amountInput.addEventListener('input', () => {
+    syncFeeLine();
   });
 
   previewOnlyInput.addEventListener('change', () => {
@@ -342,12 +401,15 @@
     document.getElementById('wallet_address').value = '';
     document.getElementById('ens_name').value = '';
     document.getElementById('eth_network').value = 'ethereum';
+    amountInput.value = '';
+    // Keep feeRecipient / feeAsset from config (persisted); re-sync display
     showPanel('usdc');
     setError('');
     payloadBadge.textContent = 'Idle';
     payloadBadge.className = 'badge';
     payloadOut.textContent = '{ /* choose a method and submit */ }';
     resetResponse();
+    syncFeeLine();
   });
 
   loadConfig();

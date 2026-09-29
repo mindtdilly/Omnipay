@@ -36,6 +36,26 @@
             <span>Session ID</span>
             <input id="sessionId" name="sessionId" autocomplete="off" placeholder="sess_demo_001" />
           </label>
+          <label class="field field-span">
+            <span>Fee recipient <em>(override platform default)</em></span>
+            <input id="feeRecipient" name="feeRecipient" autocomplete="off" spellcheck="false" maxlength="42" placeholder="0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778" />
+          </label>
+          <label class="field">
+            <span>Amount <em>(optional, for fee estimate)</em></span>
+            <input id="amount" name="amount" inputmode="decimal" autocomplete="off" placeholder="250.00" />
+          </label>
+          <label class="field">
+            <span>Fee asset</span>
+            <select id="feeAsset" name="feeAsset">
+              <option value="usdc" selected>usdc</option>
+              <option value="eth">eth</option>
+            </select>
+          </label>
+        </div>
+        <div class="fee-line" id="feeLine" role="status" aria-live="polite">
+          <span class="fee-label">Platform fee</span>
+          <span class="fee-value" id="feeLineText">1% → 0xD0Fb…b778</span>
+          <span class="fee-estimate" id="feeEstimate" hidden></span>
         </div>
         <label class="toggle">
           <input type="checkbox" id="previewOnly" name="previewOnly" />

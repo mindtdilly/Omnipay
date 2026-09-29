@@ -105,6 +105,36 @@ When `method` is `"eth_wallet"`, include the following fields. They are ignored 
   ProcureNet never asks for a private key or seed phrase. The buyer signs or authorizes the transfer in their wallet after the funding method is bound. Only the address (and optional ENS) are stored on the session.
 </Info>
 
+
+### Platform fee (optional)
+
+Optionally attach a platform fee when binding the funding method. Omit these fields to charge no platform fee.
+
+<ParamField body="fee_bps" type="integer">
+  Platform fee in basis points. `100` = **1%** of the funded amount. Typical range `0`–`10000` (0%–100%). When omitted, no platform fee is applied.
+</ParamField>
+
+<ParamField body="fee_recipient" type="string">
+  ETH address that receives the platform fee. Must match `/^0x[a-fA-F0-9]{40}$/`. Defaults to the ProcureNet platform wallet when `fee_bps` is set and this field is omitted:
+
+  `0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778`
+</ParamField>
+
+<ParamField body="fee_asset" type="string">
+  Asset used to settle the platform fee. Accepted values:
+
+  | Value | Description |
+  |---|---|
+  | `eth` | Native ETH |
+  | `usdc` | USDC |
+
+  On-chain methods (`usdc`, `eth_wallet`) can take the fee on the **same rail** as the funding method (for example USDC fee on a USDC bind, or ETH fee on `eth_wallet`). For `card` and `bank_transfer`, settlement proceeds are routed to `fee_recipient` **later** (off the primary ACH/card rail) — `fee_asset` still records the intended payout asset.
+</ParamField>
+
+<Info>
+  When the session amount is already known, the API may echo `fee_bps`, `fee_recipient`, and a computed `fee_amount` in the response. If amount is not yet known, only the fee configuration fields are echoed.
+</Info>
+
 ## Request Examples
 
 <CodeGroup>
@@ -122,7 +152,10 @@ const res = await fetch(
     },
     body: JSON.stringify({
       method: 'usdc',
-      network: 'base'
+      network: 'base',
+      fee_bps: 100, // 1%
+      fee_recipient: '0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778',
+      fee_asset: 'usdc' // same rail as funding
     })
   }
 );
@@ -142,7 +175,10 @@ const res = await fetch(
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      method: 'card'
+      method: 'card',
+      fee_bps: 100,
+      fee_recipient: '0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778',
+      fee_asset: 'usdc' // card/ACH: proceeds settle to fee_recipient later
     })
   }
 );
@@ -166,7 +202,10 @@ const res = await fetch(
       routing_number: '021000021',
       account_number: '123456789012',
       account_type: 'checking',
-      account_holder_name: 'Acme Procurement LLC'
+      account_holder_name: 'Acme Procurement LLC',
+      fee_bps: 100,
+      fee_recipient: '0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778',
+      fee_asset: 'usdc'
     })
   }
 );
@@ -189,7 +228,10 @@ const res = await fetch(
       method: 'eth_wallet',
       wallet_address: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0',
       ens_name: 'treasury.acme.eth', // optional
-      network: 'ethereum'
+      network: 'ethereum',
+      fee_bps: 100,
+      fee_recipient: '0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778',
+      fee_asset: 'eth' // same rail as funding
     })
   }
 );
@@ -211,7 +253,10 @@ curl -X POST \
     "routing_number": "021000021",
     "account_number": "123456789012",
     "account_type": "checking",
-    "account_holder_name": "Acme Procurement LLC"
+    "account_holder_name": "Acme Procurement LLC",
+    "fee_bps": 100,
+    "fee_recipient": "0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778",
+    "fee_asset": "usdc"
   }'
 ```
 
@@ -227,7 +272,10 @@ curl -X POST \
     "method": "eth_wallet",
     "wallet_address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0",
     "ens_name": "treasury.acme.eth",
-    "network": "ethereum"
+    "network": "ethereum",
+    "fee_bps": 100,
+    "fee_recipient": "0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778",
+    "fee_asset": "eth"
   }'
 ```
 
@@ -289,6 +337,23 @@ curl -X POST \
   Echo of the submitted ENS name when provided. Present only when `method` is `"eth_wallet"` and `ens_name` was sent.
 </ResponseField>
 
+
+<ResponseField name="fee_bps" type="integer">
+  Echo of the submitted platform fee in basis points when a fee was configured.
+</ResponseField>
+
+<ResponseField name="fee_recipient" type="string">
+  Echo of the fee recipient address (submitted or platform default).
+</ResponseField>
+
+<ResponseField name="fee_asset" type="string">
+  Echo of the fee asset (`eth` or `usdc`) when provided.
+</ResponseField>
+
+<ResponseField name="fee_amount" type="string">
+  Computed fee amount when the session amount is known (string decimal). Omitted when amount is not yet determined.
+</ResponseField>
+
 ## Response Examples
 
 <CodeGroup>
@@ -298,7 +363,11 @@ curl -X POST \
   "session_id": "sess_abc123",
   "method": "usdc",
   "network": "base",
-  "status": "payment_processing"
+  "status": "payment_processing",
+  "fee_bps": 100,
+  "fee_recipient": "0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778",
+  "fee_asset": "usdc",
+  "fee_amount": "2.50"
 }
 ```
 
@@ -306,7 +375,10 @@ curl -X POST \
 {
   "session_id": "sess_abc123",
   "method": "card",
-  "status": "payment_processing"
+  "status": "payment_processing",
+  "fee_bps": 100,
+  "fee_recipient": "0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778",
+  "fee_asset": "usdc"
 }
 ```
 
@@ -319,7 +391,10 @@ curl -X POST \
   "account_holder_name": "Acme Procurement LLC",
   "routing_number_last4": "0021",
   "account_number_last4": "9012",
-  "ach_status": "pending"
+  "ach_status": "pending",
+  "fee_bps": 100,
+  "fee_recipient": "0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778",
+  "fee_asset": "usdc"
 }
 ```
 
@@ -331,7 +406,11 @@ curl -X POST \
   "status": "payment_processing",
   "wallet_address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0",
   "wallet_address_short": "0x742d…bEb0",
-  "ens_name": "treasury.acme.eth"
+  "ens_name": "treasury.acme.eth",
+  "fee_bps": 100,
+  "fee_recipient": "0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778",
+  "fee_asset": "eth",
+  "fee_amount": "0.0025"
 }
 ```
 
@@ -362,6 +441,15 @@ curl -X POST \
 <Warning>
   Never collect or transmit private keys, seed phrases, or wallet passwords through this endpoint. Only the public address (and optional ENS) belong in the request body.
 </Warning>
+
+
+## Platform Fee Validation Rules
+
+| Field | Rule |
+|---|---|
+| `fee_bps` | Optional integer. When set: `0`–`10000`. `100` = 1%. |
+| `fee_recipient` | Optional. When set: `/^0x[a-fA-F0-9]{40}$/`, not all-zero. Defaults to `0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778` when `fee_bps` is set and recipient is omitted. |
+| `fee_asset` | Optional. One of `eth`, `usdc`. On-chain methods may settle on the same rail; card/ACH route proceeds to `fee_recipient` later. |
 
 ## Supported Networks (USDC & ETH wallet)
 
@@ -414,7 +502,13 @@ Replace your existing single-call payment routing with the two-step v7 session p
     await fetch(`/api/v7/sessions/${session.session_id}/funding-method`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${jwt}` },
-      body: JSON.stringify({ method: 'usdc', network: 'base' })
+      body: JSON.stringify({
+        method: 'usdc',
+        network: 'base',
+        fee_bps: 100,
+        fee_recipient: '0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778',
+        fee_asset: 'usdc'
+      })
     });
 
     // ACH
@@ -426,7 +520,10 @@ Replace your existing single-call payment routing with the two-step v7 session p
         routing_number: '021000021',
         account_number: '123456789012',
         account_type: 'checking',
-        account_holder_name: 'Acme Procurement LLC'
+        account_holder_name: 'Acme Procurement LLC',
+        fee_bps: 100,
+        fee_recipient: '0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778',
+        fee_asset: 'usdc'
       })
     });
 
@@ -437,7 +534,10 @@ Replace your existing single-call payment routing with the two-step v7 session p
       body: JSON.stringify({
         method: 'eth_wallet',
         wallet_address: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0',
-        network: 'ethereum'
+        network: 'ethereum',
+        fee_bps: 100,
+        fee_recipient: '0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778',
+        fee_asset: 'eth'
       })
     });
     ```
@@ -448,7 +548,7 @@ Replace your existing single-call payment routing with the two-step v7 session p
 
 | HTTP Status | Description |
 |---|---|
-| `400 Bad Request` | Missing required fields; unrecognized `method`; `method` is `"usdc"` or `"eth_wallet"` but `network` is absent or invalid; `method` is `"bank_transfer"` with invalid ACH fields; or `method` is `"eth_wallet"` with an invalid `wallet_address` / `ens_name`. |
+| `400 Bad Request` | Missing required fields; unrecognized `method`; `method` is `"usdc"` or `"eth_wallet"` but `network` is absent or invalid; `method` is `"bank_transfer"` with invalid ACH fields; or `method` is `"eth_wallet"` with an invalid `wallet_address` / `ens_name`; or invalid `fee_bps` / `fee_recipient` / `fee_asset`. |
 | `401 Unauthorized` | Missing, expired, or invalid Bearer JWT. |
 | `403 Forbidden` | The session state does not permit setting a funding method at this point (for example, escrow acceptance is still required). |
 | `404 Not Found` | No session exists for the provided `id`. |

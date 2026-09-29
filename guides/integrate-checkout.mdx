@@ -126,6 +126,8 @@ const prefillData = await prefillRes.json();
 
 Once the buyer has selected a payment method, register it against the session by calling `POST /api/v7/sessions/{id}/funding-method`. This endpoint requires a Bearer JWT. Supported methods are `usdc` (with `network`), `card`, `bank_transfer` (ACH), and `eth_wallet` (wallet address + network; optional ENS).
 
+Optionally include a **platform fee** on the bind: `fee_bps` (`100` = 1%), `fee_recipient` (ETH address; defaults to `0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778`), and `fee_asset` (`eth` | `usdc`). On-chain methods can take the fee on the same rail; card/ACH settle proceeds to `fee_recipient` later. When amount is known, the response may echo `fee_bps`, `fee_recipient`, and `fee_amount`.
+
 See [POST /funding-method](/api/sessions-funding-method) for the full field reference. A static funding-method picker demo lives at `examples/checkout-funding-picker/` in the docs repo.
 
 <Tabs>
@@ -141,7 +143,10 @@ See [POST /funding-method](/api/sessions-funding-method) for the full field refe
         },
         body: JSON.stringify({
           method: 'usdc',
-          network: 'base' // base | arbitrum | polygon | ethereum
+          network: 'base', // base | arbitrum | polygon | ethereum
+          fee_bps: 100, // 1%
+          fee_recipient: '0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778',
+          fee_asset: 'usdc'
         })
       }
     );
@@ -158,7 +163,10 @@ See [POST /funding-method](/api/sessions-funding-method) for the full field refe
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          method: 'card'
+          method: 'card',
+          fee_bps: 100,
+          fee_recipient: '0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778',
+          fee_asset: 'usdc' // card/ACH: proceeds to fee_recipient later
         })
       }
     );
@@ -179,7 +187,10 @@ See [POST /funding-method](/api/sessions-funding-method) for the full field refe
           routing_number: '021000021',       // ABA, 9 digits (string)
           account_number: '123456789012',
           account_type: 'checking',          // checking | savings
-          account_holder_name: 'Acme Procurement LLC'
+          account_holder_name: 'Acme Procurement LLC',
+          fee_bps: 100,
+          fee_recipient: '0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778',
+          fee_asset: 'usdc'
         })
       }
     );
@@ -203,7 +214,10 @@ See [POST /funding-method](/api/sessions-funding-method) for the full field refe
           method: 'eth_wallet',
           wallet_address: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0',
           ens_name: 'treasury.acme.eth', // optional
-          network: 'ethereum'             // ethereum | base | arbitrum | polygon
+          network: 'ethereum',            // ethereum | base | arbitrum | polygon
+          fee_bps: 100,
+          fee_recipient: '0xD0Fb43F2e9b4Dcd4C9FB70DA89385f77086cb778',
+          fee_asset: 'eth'
         })
       }
     );
