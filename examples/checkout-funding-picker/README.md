@@ -7,8 +7,9 @@ Supports:
 - **USDC** — with network select (`base`, `arbitrum`, `polygon`, `ethereum`)
 - **Card** — binds `method: "card"`
 - **ACH** (`bank_transfer`) — `routing_number`, `account_number`, `account_type`, `account_holder_name`
+- **ETH wallet** (`eth_wallet`) — `wallet_address` (`0x` + 40 hex), optional `ens_name`, `network` (default `ethereum`)
 
-On submit, the page validates client-side (including ABA check digit for routing numbers), shows the request JSON, and by default performs a **live** `fetch` POST. Enable **Preview only** to skip the network call.
+On submit, the page validates client-side (ABA check digit for ACH; basic hex address for ETH), shows the request JSON, and by default performs a **live** `fetch` POST. Enable **Preview only** to skip the network call.
 
 ## Config (localStorage)
 
@@ -51,7 +52,7 @@ python3 -m http.server 8765 --directory examples/checkout-funding-picker
 |---|---|
 | `index.html` | Markup, config fields, form structure |
 | `styles.css` | Institutional paper / navy styling |
-| `app.js` | Config persistence, ACH validation, live POST, response panel |
+| `app.js` | Config persistence, ACH/ETH validation, live POST, response panel |
 
 ## Related docs
 

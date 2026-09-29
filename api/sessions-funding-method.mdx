@@ -1,10 +1,10 @@
 ---
 title: "Funding Method — Bind Payment to Procurement Session"
 sidebarTitle: "POST /funding-method"
-description: "Bind a payment method to an active procurement session. Accepts USDC on-chain, card, or ACH bank transfer. Replaces the deprecated POST /api/payments/route."
+description: "Bind a payment method to an active procurement session. Accepts USDC on-chain, card, ACH bank transfer, or ETH wallet. Replaces the deprecated POST /api/payments/route."
 ---
 
-Once a procurement session is ready for payment, this endpoint binds a funding method to it. You specify the method type — USDC, card, or bank transfer (ACH) — and supply method-specific fields. For USDC payments, include the target blockchain network. For ACH bank transfers, include routing and account details. ProcureNet validates the combination against the session's state and the buyer's entitlements, then advances the session toward payment processing. This endpoint replaces the deprecated `POST /api/payments/route` — if your integration still uses that path, follow the migration guidance at the bottom of this page.
+Once a procurement session is ready for payment, this endpoint binds a funding method to it. You specify the method type — USDC, card, bank transfer (ACH), or ETH wallet — and supply method-specific fields. For USDC and ETH wallet payments, include the target blockchain network. For ACH bank transfers, include routing and account details. For ETH wallet, include the `0x` address (optional ENS). ProcureNet validates the combination against the session's state and the buyer's entitlements, then advances the session toward payment processing. This endpoint replaces the deprecated `POST /api/payments/route` — if your integration still uses that path, follow the migration guidance at the bottom of this page.
 
 ## Authentication
 
@@ -32,21 +32,22 @@ Authorization: Bearer <your_jwt>
   | `usdc` | On-chain USDC transfer. Requires the `network` field. |
   | `card` | Credit or debit card. Network and ACH fields are ignored. |
   | `bank_transfer` | ACH debit from a US bank account. Requires ACH fields below. Network is ignored. |
+  | `eth_wallet` | Native ETH from a buyer wallet. Requires `wallet_address` and `network`. Optional `ens_name`. |
 </ParamField>
 
 <ParamField body="network" type="string">
-  The blockchain network for USDC transfers. Required when `method` is `"usdc"`. Ignored for all other methods.
+  The blockchain network for on-chain funding. Required when `method` is `"usdc"` or `"eth_wallet"`. Ignored for `card` and `bank_transfer`.
 
   Supported values: `base`, `arbitrum`, `polygon`, `ethereum`.
 
   <Tip>
-    `base` offers the lowest gas fees for most USDC transfers and is the recommended network unless your buyer or contract rules require otherwise.
+    For USDC, `base` offers the lowest gas fees and is recommended unless your buyer or contract rules require otherwise. For native ETH (`eth_wallet`), default to `ethereum` unless the buyer wallet is L2-native.
   </Tip>
 </ParamField>
 
 ### ACH fields (`method: "bank_transfer"`)
 
-When `method` is `"bank_transfer"`, include the following fields. They are ignored for `usdc` and `card`.
+When `method` is `"bank_transfer"`, include the following fields. They are ignored for `usdc`, `card`, and `eth_wallet`.
 
 <ParamField body="routing_number" type="string" required>
   ABA routing transit number for the buyer's US bank. Must be exactly **9 digits**. Leading zeros are significant — send as a string, not a number.
@@ -77,6 +78,31 @@ When `method` is `"bank_transfer"`, include the following fields. They are ignor
 
 <Info>
   ACH credentials are transmitted over TLS and stored only as needed to originate the debit. Full account numbers are never returned in API responses — only a masked last-four form is echoed.
+</Info>
+
+
+### ETH wallet fields (`method: "eth_wallet"`)
+
+When `method` is `"eth_wallet"`, include the following fields. They are ignored for `usdc`, `card`, and `bank_transfer`.
+
+<ParamField body="wallet_address" type="string" required>
+  Buyer EVM wallet address that will fund the session with native ETH. Must be a checksum-compatible hex address: `0x` followed by exactly **40** hexadecimal characters (`/^0x[a-fA-F0-9]{40}$/`). Case may be mixed (EIP-55); the API normalizes to lowercase for storage and returns the submitted casing when valid.
+
+  Example: `"0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0"`
+</ParamField>
+
+<ParamField body="ens_name" type="string">
+  Optional ENS name associated with the wallet (for example `"acme.eth"`). Display and verification aid only — settlement always uses `wallet_address`. If both are provided, the resolved ENS address must match `wallet_address` or the request fails with `422`.
+
+  Example: `"treasury.acme.eth"`
+</ParamField>
+
+<ParamField body="network" type="string" required>
+  Chain for the ETH debit. Same enum as USDC: `base`, `arbitrum`, `polygon`, `ethereum`. Prefer `ethereum` for native mainnet ETH unless the buyer wallet is L2-native.
+</ParamField>
+
+<Info>
+  ProcureNet never asks for a private key or seed phrase. The buyer signs or authorizes the transfer in their wallet after the funding method is bound. Only the address (and optional ENS) are stored on the session.
 </Info>
 
 ## Request Examples
@@ -148,6 +174,29 @@ const res = await fetch(
 const result = await res.json();
 ```
 
+```typescript ETH Wallet
+const sessionId = 'sess_abc123';
+
+const res = await fetch(
+  `https://api.procurenet.io/api/v7/sessions/${sessionId}/funding-method`,
+  {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9...',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      method: 'eth_wallet',
+      wallet_address: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0',
+      ens_name: 'treasury.acme.eth', // optional
+      network: 'ethereum'
+    })
+  }
+);
+
+const result = await res.json();
+```
+
 </CodeGroup>
 
 ### cURL — ACH
@@ -166,6 +215,22 @@ curl -X POST \
   }'
 ```
 
+
+### cURL — ETH wallet
+
+```bash
+curl -X POST \
+  https://api.procurenet.io/api/v7/sessions/sess_abc123/funding-method \
+  -H "Authorization: Bearer $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "eth_wallet",
+    "wallet_address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0",
+    "ens_name": "treasury.acme.eth",
+    "network": "ethereum"
+  }'
+```
+
 ## Response Fields
 
 <ResponseField name="session_id" type="string" required>
@@ -173,11 +238,11 @@ curl -X POST \
 </ResponseField>
 
 <ResponseField name="method" type="string" required>
-  Confirms the payment method that was bound to the session (`usdc`, `card`, or `bank_transfer`).
+  Confirms the payment method that was bound to the session (`usdc`, `card`, `bank_transfer`, or `eth_wallet`).
 </ResponseField>
 
 <ResponseField name="network" type="string">
-  The blockchain network confirmed for USDC transfers. Present only when `method` is `"usdc"`.
+  The blockchain network confirmed for on-chain funding. Present when `method` is `"usdc"` or `"eth_wallet"`.
 </ResponseField>
 
 <ResponseField name="status" type="string" required>
@@ -209,6 +274,19 @@ curl -X POST \
   | `submitted` | Sent to the ACH network. |
   | `settled` | Funds cleared. |
   | `returned` | Debit returned (insufficient funds, invalid account, etc.). |
+</ResponseField>
+
+
+<ResponseField name="wallet_address" type="string">
+  Echo of the submitted wallet address. Present only when `method` is `"eth_wallet"`.
+</ResponseField>
+
+<ResponseField name="wallet_address_short" type="string">
+  Short display form (`0x` + first 4 + `…` + last 4). Present only when `method` is `"eth_wallet"`.
+</ResponseField>
+
+<ResponseField name="ens_name" type="string">
+  Echo of the submitted ENS name when provided. Present only when `method` is `"eth_wallet"` and `ens_name` was sent.
 </ResponseField>
 
 ## Response Examples
@@ -245,6 +323,18 @@ curl -X POST \
 }
 ```
 
+```json ETH Wallet
+{
+  "session_id": "sess_abc123",
+  "method": "eth_wallet",
+  "network": "ethereum",
+  "status": "payment_processing",
+  "wallet_address": "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0",
+  "wallet_address_short": "0x742d…bEb0",
+  "ens_name": "treasury.acme.eth"
+}
+```
+
 </CodeGroup>
 
 ## ACH Validation Rules
@@ -260,7 +350,20 @@ curl -X POST \
   Do not send routing or account numbers as JSON numbers. Leading zeros in ABA routing numbers are significant; always use strings.
 </Warning>
 
-## Supported Networks for USDC
+
+## ETH Wallet Validation Rules
+
+| Field | Rule |
+|---|---|
+| `wallet_address` | Required. Must match `/^0x[a-fA-F0-9]{40}$/`. Reject all-zero address (`0x` + 40 zeros). |
+| `ens_name` | Optional. If present: 3–255 chars, valid ENS-like label (letters, digits, hyphens, dots), typically ending in `.eth`. |
+| `network` | Required. One of `base`, `arbitrum`, `polygon`, `ethereum`. |
+
+<Warning>
+  Never collect or transmit private keys, seed phrases, or wallet passwords through this endpoint. Only the public address (and optional ENS) belong in the request body.
+</Warning>
+
+## Supported Networks (USDC & ETH wallet)
 
 <CardGroup cols={2}>
   <Card title="Base" icon="circle-check">
@@ -326,6 +429,17 @@ Replace your existing single-call payment routing with the two-step v7 session p
         account_holder_name: 'Acme Procurement LLC'
       })
     });
+
+    // ETH wallet
+    await fetch(`/api/v7/sessions/${session.session_id}/funding-method`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${jwt}` },
+      body: JSON.stringify({
+        method: 'eth_wallet',
+        wallet_address: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0',
+        network: 'ethereum'
+      })
+    });
     ```
   </Step>
 </Steps>
@@ -334,13 +448,13 @@ Replace your existing single-call payment routing with the two-step v7 session p
 
 | HTTP Status | Description |
 |---|---|
-| `400 Bad Request` | Missing required fields; unrecognized `method`; `method` is `"usdc"` but `network` is absent or invalid; or `method` is `"bank_transfer"` with invalid ACH fields (bad routing check digit, wrong length, unknown `account_type`, empty holder name). |
+| `400 Bad Request` | Missing required fields; unrecognized `method`; `method` is `"usdc"` or `"eth_wallet"` but `network` is absent or invalid; `method` is `"bank_transfer"` with invalid ACH fields; or `method` is `"eth_wallet"` with an invalid `wallet_address` / `ens_name`. |
 | `401 Unauthorized` | Missing, expired, or invalid Bearer JWT. |
 | `403 Forbidden` | The session state does not permit setting a funding method at this point (for example, escrow acceptance is still required). |
 | `404 Not Found` | No session exists for the provided `id`. |
 | `409 Conflict` | A funding method is already set for this session. Transition to a new session if you need to change it. |
 | `410 Gone` | The session has expired. Start a new session with `POST /api/v7/orchestrate`. |
-| `422 Unprocessable Entity` | ACH details failed bank-side pre-validation (for example, routing number not found in the ABA directory). |
+| `422 Unprocessable Entity` | ACH details failed bank-side pre-validation (for example, routing number not found in the ABA directory); or ENS name does not resolve to the submitted `wallet_address`. |
 
 ### ACH-specific error body example
 
@@ -355,3 +469,18 @@ Replace your existing single-call payment routing with the two-step v7 session p
 ```
 
 Common ACH field error codes: `invalid_routing_number`, `invalid_account_number`, `invalid_account_type`, `invalid_account_holder_name`, `missing_ach_fields`.
+
+### ETH wallet-specific error body example
+
+```json
+{
+  "error": {
+    "code": "invalid_wallet_address",
+    "message": "wallet_address must be 0x followed by 40 hex characters",
+    "field": "wallet_address"
+  }
+}
+```
+
+Common ETH wallet field error codes: `invalid_wallet_address`, `invalid_ens_name`, `ens_address_mismatch`, `missing_eth_wallet_fields`, `invalid_network`.
+

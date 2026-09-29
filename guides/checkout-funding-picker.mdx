@@ -1,7 +1,7 @@
 ---
 title: "Funding Method Picker Example"
 sidebarTitle: "Funding Method Picker"
-description: "Checkout UI demo for binding USDC, card, or ACH bank_transfer to a ProcureNet v7 session, with optional live POST."
+description: "Checkout UI demo for binding USDC, card, ACH bank_transfer, or eth_wallet to a ProcureNet v7 session, with optional live POST."
 ---
 
 This repository includes a self-contained funding-method picker under `examples/checkout-funding-picker/`. Use it as a reference when building buyer-facing checkout that calls `POST /api/v7/sessions/{id}/funding-method`.
@@ -13,8 +13,9 @@ This repository includes a self-contained funding-method picker under `examples/
 | `usdc` | Network select (`base`, `arbitrum`, `polygon`, `ethereum`) | `{ method, network }` |
 | `card` | Method selection only | `{ method: "card" }` |
 | `bank_transfer` | Routing number, account number, account type, account holder name | Full ACH fields |
+| `eth_wallet` | Wallet address, optional ENS, network (default `ethereum`) | `{ method, wallet_address, network, ens_name? }` |
 
-The demo validates ACH fields client-side (9-digit ABA routing with check digit, 4–17 digit account number, `checking` \| `savings`, holder name length), previews the JSON body, and can **POST live** to your API base URL with a Bearer JWT.
+The demo validates ACH and ETH fields client-side (ABA check digit; `0x` + 40 hex address), previews the JSON body, and can **POST live** to your API base URL with a Bearer JWT.
 
 ## Config
 
@@ -33,5 +34,5 @@ Or open `examples/checkout-funding-picker/index.html` directly in a browser.
 
 ## Related
 
-- [POST /funding-method](/api/sessions-funding-method) — full request/response and ACH validation rules
+- [POST /funding-method](/api/sessions-funding-method) — full request/response, ACH, and ETH wallet rules
 - [Integrate Checkout](/guides/integrate-checkout) — end-to-end session flow

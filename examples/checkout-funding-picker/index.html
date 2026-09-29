@@ -69,6 +69,13 @@
               <span class="method-sub">US bank transfer</span>
             </span>
           </label>
+          <label class="method-option">
+            <input type="radio" name="method" value="eth_wallet" />
+            <span class="method-face">
+              <span class="method-title">ETH wallet</span>
+              <span class="method-sub">Native ether</span>
+            </span>
+          </label>
         </div>
       </section>
 
@@ -114,6 +121,31 @@
           </label>
         </div>
         <p class="hint">Send routing and account numbers as strings so leading zeros are preserved. Full account numbers are never returned by the API.</p>
+      </section>
+
+
+      <section class="section panel" id="panel-eth" data-panel="eth_wallet" hidden>
+        <h3>ETH wallet</h3>
+        <div class="field-grid">
+          <label class="field field-span">
+            <span>Wallet address <em>(0x + 40 hex)</em></span>
+            <input id="wallet_address" name="wallet_address" autocomplete="off" spellcheck="false" maxlength="42" placeholder="0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0" />
+          </label>
+          <label class="field field-span">
+            <span>ENS name <em>(optional)</em></span>
+            <input id="ens_name" name="ens_name" autocomplete="off" maxlength="255" placeholder="treasury.acme.eth" />
+          </label>
+          <label class="field field-span">
+            <span>Network</span>
+            <select id="eth_network" name="eth_network">
+              <option value="ethereum" selected>Ethereum (default)</option>
+              <option value="base">Base</option>
+              <option value="arbitrum">Arbitrum</option>
+              <option value="polygon">Polygon</option>
+            </select>
+          </label>
+        </div>
+        <p class="hint">Only the public address is sent. Never paste a private key or seed phrase into this form.</p>
       </section>
 
       <p class="form-error" id="formError" hidden role="alert"></p>

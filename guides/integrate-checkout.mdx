@@ -124,7 +124,7 @@ const prefillData = await prefillRes.json();
 
 ### Set the Funding Method
 
-Once the buyer has selected a payment method, register it against the session by calling `POST /api/v7/sessions/{id}/funding-method`. This endpoint requires a Bearer JWT. Supported methods are `usdc` (with `network`), `card`, and `bank_transfer` (ACH).
+Once the buyer has selected a payment method, register it against the session by calling `POST /api/v7/sessions/{id}/funding-method`. This endpoint requires a Bearer JWT. Supported methods are `usdc` (with `network`), `card`, `bank_transfer` (ACH), and `eth_wallet` (wallet address + network; optional ENS).
 
 See [POST /funding-method](/api/sessions-funding-method) for the full field reference. A static funding-method picker demo lives at `examples/checkout-funding-picker/` in the docs repo.
 
@@ -187,6 +187,30 @@ See [POST /funding-method](/api/sessions-funding-method) for the full field refe
 
     <Note>
       Always send `routing_number` and `account_number` as strings so leading zeros are preserved. Full account numbers are never returned in responses — only `routing_number_last4` and `account_number_last4`.
+    </Note>
+  </Tab>
+  <Tab title="ETH wallet (eth_wallet)">
+    ```typescript
+    const fundingRes = await fetch(
+      `https://api.procurenet.io/api/v7/sessions/${session_id}/funding-method`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          method: 'eth_wallet',
+          wallet_address: '0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb0',
+          ens_name: 'treasury.acme.eth', // optional
+          network: 'ethereum'             // ethereum | base | arbitrum | polygon
+        })
+      }
+    );
+    ```
+
+    <Note>
+      `wallet_address` must be `0x` + 40 hex characters. Never send private keys. Settlement is authorized in the buyer wallet after the method is bound.
     </Note>
   </Tab>
 </Tabs>
