@@ -88,6 +88,21 @@
     formError.textContent = message;
   }
 
+
+  function isValidEthAddress(addr) {
+    if (!/^0x[a-fA-F0-9]{40}$/.test(addr)) return false;
+    // Reject all-zero address
+    if (/^0x0{40}$/i.test(addr)) return false;
+    return true;
+  }
+
+  function isValidEnsName(name) {
+    if (!name) return true;
+    if (name.length < 3 || name.length > 255) return false;
+    // Basic ENS-like: labels separated by dots, optional trailing .eth
+    return /^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/i.test(name);
+  }
+
   function abaCheckDigitValid(routing) {
     if (!/^\d{9}$/.test(routing)) return false;
     const d = routing.split('').map(Number);
@@ -108,6 +123,34 @@
     }
 
     if (method === 'card') {
+      return { ok: true, body };
+    }
+
+    if (method === 'eth_wallet') {
+      const wallet_address = document.getElementById('wallet_address').value.trim();
+      const ens_name = document.getElementById('ens_name').value.trim();
+      const network = document.getElementById('eth_network').value;
+
+      if (!isValidEthAddress(wallet_address)) {
+        return {
+          ok: false,
+          error: 'wallet_address must be 0x followed by exactly 40 hex characters (non-zero).',
+        };
+      }
+      if (ens_name && !isValidEnsName(ens_name)) {
+        return {
+          ok: false,
+          error: 'ens_name must be a valid ENS-like name (3–255 chars, labels and dots).',
+        };
+      }
+      const networks = ['base', 'arbitrum', 'polygon', 'ethereum'];
+      if (!networks.includes(network)) {
+        return { ok: false, error: 'network must be base, arbitrum, polygon, or ethereum.' };
+      }
+
+      body.wallet_address = wallet_address;
+      body.network = network;
+      if (ens_name) body.ens_name = ens_name;
       return { ok: true, body };
     }
 
@@ -296,6 +339,9 @@
     document.getElementById('account_number').value = '';
     document.getElementById('account_type').value = 'checking';
     document.getElementById('account_holder_name').value = '';
+    document.getElementById('wallet_address').value = '';
+    document.getElementById('ens_name').value = '';
+    document.getElementById('eth_network').value = 'ethereum';
     showPanel('usdc');
     setError('');
     payloadBadge.textContent = 'Idle';
