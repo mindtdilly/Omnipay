@@ -1,10 +1,10 @@
 ---
 title: "Funding Method — Bind Payment to Procurement Session"
 sidebarTitle: "POST /funding-method"
-description: "Bind a payment method to an active procurement session. Accepts USDC on-chain, card, or bank transfer. Replaces the deprecated POST /api/payments/route."
+description: "Bind a payment method to an active procurement session. Accepts USDC on-chain, card, or ACH bank transfer. Replaces the deprecated POST /api/payments/route."
 ---
 
-Once a procurement session is ready for payment, this endpoint binds a funding method to it. You specify the method type — USDC, card, or bank transfer — and for USDC payments, the target blockchain network. ProcureNet validates the combination against the session's state and the buyer's entitlements, then advances the session toward payment processing. This endpoint replaces the deprecated `POST /api/payments/route` — if your integration still uses that path, follow the migration guidance at the bottom of this page.
+Once a procurement session is ready for payment, this endpoint binds a funding method to it. You specify the method type — USDC, card, or bank transfer (ACH) — and supply method-specific fields. For USDC payments, include the target blockchain network. For ACH bank transfers, include routing and account details. ProcureNet validates the combination against the session's state and the buyer's entitlements, then advances the session toward payment processing. This endpoint replaces the deprecated `POST /api/payments/route` — if your integration still uses that path, follow the migration guidance at the bottom of this page.
 
 ## Authentication
 
@@ -30,8 +30,8 @@ Authorization: Bearer <your_jwt>
   | Value | Description |
   |---|---|
   | `usdc` | On-chain USDC transfer. Requires the `network` field. |
-  | `card` | Credit or debit card. Network field is ignored. |
-  | `bank_transfer` | ACH or wire transfer. Network field is ignored. |
+  | `card` | Credit or debit card. Network and ACH fields are ignored. |
+  | `bank_transfer` | ACH debit from a US bank account. Requires ACH fields below. Network is ignored. |
 </ParamField>
 
 <ParamField body="network" type="string">
@@ -43,6 +43,41 @@ Authorization: Bearer <your_jwt>
     `base` offers the lowest gas fees for most USDC transfers and is the recommended network unless your buyer or contract rules require otherwise.
   </Tip>
 </ParamField>
+
+### ACH fields (`method: "bank_transfer"`)
+
+When `method` is `"bank_transfer"`, include the following fields. They are ignored for `usdc` and `card`.
+
+<ParamField body="routing_number" type="string" required>
+  ABA routing transit number for the buyer's US bank. Must be exactly **9 digits**. Leading zeros are significant — send as a string, not a number.
+
+  Example: `"021000021"`
+</ParamField>
+
+<ParamField body="account_number" type="string" required>
+  The buyer's bank account number. Digits only; typically 4–17 characters. Do not include spaces or hyphens.
+
+  Example: `"123456789012"`
+</ParamField>
+
+<ParamField body="account_type" type="string" required>
+  The type of bank account to debit. Accepted values:
+
+  | Value | Description |
+  |---|---|
+  | `checking` | Checking account |
+  | `savings` | Savings account |
+</ParamField>
+
+<ParamField body="account_holder_name" type="string" required>
+  Legal name on the bank account, as it appears at the financial institution. Used for ACH authorization matching. Length 2–100 characters.
+
+  Example: `"Acme Procurement LLC"`
+</ParamField>
+
+<Info>
+  ACH credentials are transmitted over TLS and stored only as needed to originate the debit. Full account numbers are never returned in API responses — only a masked last-four form is echoed.
+</Info>
 
 ## Request Examples
 
@@ -89,7 +124,7 @@ const res = await fetch(
 const result = await res.json();
 ```
 
-```typescript Bank Transfer
+```typescript ACH Bank Transfer
 const sessionId = 'sess_abc123';
 
 const res = await fetch(
@@ -101,7 +136,11 @@ const res = await fetch(
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      method: 'bank_transfer'
+      method: 'bank_transfer',
+      routing_number: '021000021',
+      account_number: '123456789012',
+      account_type: 'checking',
+      account_holder_name: 'Acme Procurement LLC'
     })
   }
 );
@@ -111,6 +150,22 @@ const result = await res.json();
 
 </CodeGroup>
 
+### cURL — ACH
+
+```bash
+curl -X POST \
+  https://api.procurenet.io/api/v7/sessions/sess_abc123/funding-method \
+  -H "Authorization: Bearer $JWT" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "bank_transfer",
+    "routing_number": "021000021",
+    "account_number": "123456789012",
+    "account_type": "checking",
+    "account_holder_name": "Acme Procurement LLC"
+  }'
+```
+
 ## Response Fields
 
 <ResponseField name="session_id" type="string" required>
@@ -118,7 +173,7 @@ const result = await res.json();
 </ResponseField>
 
 <ResponseField name="method" type="string" required>
-  Confirms the payment method that was bound to the session.
+  Confirms the payment method that was bound to the session (`usdc`, `card`, or `bank_transfer`).
 </ResponseField>
 
 <ResponseField name="network" type="string">
@@ -126,12 +181,41 @@ const result = await res.json();
 </ResponseField>
 
 <ResponseField name="status" type="string" required>
-  The session status after the funding method was set. Typically `"payment_processing"` once the session advances.
+  The session status after the funding method was set. Typically `"payment_processing"` once the session advances. For ACH, status may remain `"payment_processing"` until the debit clears (see `ach_status`).
 </ResponseField>
 
-## Response Example
+<ResponseField name="account_type" type="string">
+  Echo of the submitted account type (`checking` or `savings`). Present only when `method` is `"bank_transfer"`.
+</ResponseField>
 
-```json
+<ResponseField name="account_holder_name" type="string">
+  Echo of the submitted account holder name. Present only when `method` is `"bank_transfer"`.
+</ResponseField>
+
+<ResponseField name="routing_number_last4" type="string">
+  Last four digits of the ABA routing number. Present only when `method` is `"bank_transfer"`.
+</ResponseField>
+
+<ResponseField name="account_number_last4" type="string">
+  Last four digits of the bank account number. Present only when `method` is `"bank_transfer"`. Full account numbers are never returned.
+</ResponseField>
+
+<ResponseField name="ach_status" type="string">
+  ACH-specific processing state. Present only when `method` is `"bank_transfer"`.
+
+  | Value | Description |
+  |---|---|
+  | `pending` | Debit originated; awaiting bank confirmation. |
+  | `submitted` | Sent to the ACH network. |
+  | `settled` | Funds cleared. |
+  | `returned` | Debit returned (insufficient funds, invalid account, etc.). |
+</ResponseField>
+
+## Response Examples
+
+<CodeGroup>
+
+```json USDC
 {
   "session_id": "sess_abc123",
   "method": "usdc",
@@ -139,6 +223,42 @@ const result = await res.json();
   "status": "payment_processing"
 }
 ```
+
+```json Card
+{
+  "session_id": "sess_abc123",
+  "method": "card",
+  "status": "payment_processing"
+}
+```
+
+```json ACH Bank Transfer
+{
+  "session_id": "sess_abc123",
+  "method": "bank_transfer",
+  "status": "payment_processing",
+  "account_type": "checking",
+  "account_holder_name": "Acme Procurement LLC",
+  "routing_number_last4": "0021",
+  "account_number_last4": "9012",
+  "ach_status": "pending"
+}
+```
+
+</CodeGroup>
+
+## ACH Validation Rules
+
+| Field | Rule |
+|---|---|
+| `routing_number` | Exactly 9 digits (`/^\d{9}$/`). Must pass the ABA check-digit algorithm. |
+| `account_number` | 4–17 digits (`/^\d{4,17}$/`). |
+| `account_type` | One of `checking`, `savings`. |
+| `account_holder_name` | 2–100 characters after trim; letters, spaces, hyphens, periods, and apostrophes allowed. |
+
+<Warning>
+  Do not send routing or account numbers as JSON numbers. Leading zeros in ABA routing numbers are significant; always use strings.
+</Warning>
 
 ## Supported Networks for USDC
 
@@ -187,10 +307,24 @@ Replace your existing single-call payment routing with the two-step v7 session p
     Take the `session_id` from the orchestrate response and call this endpoint to bind your payment method.
 
     ```typescript
+    // USDC
     await fetch(`/api/v7/sessions/${session.session_id}/funding-method`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${jwt}` },
       body: JSON.stringify({ method: 'usdc', network: 'base' })
+    });
+
+    // ACH
+    await fetch(`/api/v7/sessions/${session.session_id}/funding-method`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${jwt}` },
+      body: JSON.stringify({
+        method: 'bank_transfer',
+        routing_number: '021000021',
+        account_number: '123456789012',
+        account_type: 'checking',
+        account_holder_name: 'Acme Procurement LLC'
+      })
     });
     ```
   </Step>
@@ -200,9 +334,24 @@ Replace your existing single-call payment routing with the two-step v7 session p
 
 | HTTP Status | Description |
 |---|---|
-| `400 Bad Request` | Missing required fields, unrecognized `method` value, or `method` is `"usdc"` but `network` is absent or invalid. |
+| `400 Bad Request` | Missing required fields; unrecognized `method`; `method` is `"usdc"` but `network` is absent or invalid; or `method` is `"bank_transfer"` with invalid ACH fields (bad routing check digit, wrong length, unknown `account_type`, empty holder name). |
 | `401 Unauthorized` | Missing, expired, or invalid Bearer JWT. |
 | `403 Forbidden` | The session state does not permit setting a funding method at this point (for example, escrow acceptance is still required). |
 | `404 Not Found` | No session exists for the provided `id`. |
 | `409 Conflict` | A funding method is already set for this session. Transition to a new session if you need to change it. |
 | `410 Gone` | The session has expired. Start a new session with `POST /api/v7/orchestrate`. |
+| `422 Unprocessable Entity` | ACH details failed bank-side pre-validation (for example, routing number not found in the ABA directory). |
+
+### ACH-specific error body example
+
+```json
+{
+  "error": {
+    "code": "invalid_routing_number",
+    "message": "routing_number must be a valid 9-digit ABA number",
+    "field": "routing_number"
+  }
+}
+```
+
+Common ACH field error codes: `invalid_routing_number`, `invalid_account_number`, `invalid_account_type`, `invalid_account_holder_name`, `missing_ach_fields`.

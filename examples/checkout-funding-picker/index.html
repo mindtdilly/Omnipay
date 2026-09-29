@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ProcureNet — Funding Method Picker</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <p class="eyebrow">ProcureNet v7</p>
+          <h1>Checkout funding method</h1>
+        </div>
+      </div>
+      <p class="header-meta">Session <code id="sessionIdDisplay">sess_demo_001</code></p>
+    </header>
+
+    <main class="card">
+      <section class="section">
+        <h2>API connection</h2>
+        <p class="muted">Values persist in <code>localStorage</code>. Leave JWT empty only when using Preview only — live submit requires a Bearer token.</p>
+        <div class="field-grid">
+          <label class="field field-span">
+            <span>API base URL</span>
+            <input id="apiBase" name="apiBase" type="url" autocomplete="off" placeholder="https://api.procurenet.io" />
+          </label>
+          <label class="field field-span">
+            <span>Bearer JWT <em>(never hardcoded)</em></span>
+            <input id="bearerJwt" name="bearerJwt" type="password" autocomplete="off" placeholder="Paste access token" />
+          </label>
+          <label class="field field-span">
+            <span>Session ID</span>
+            <input id="sessionId" name="sessionId" autocomplete="off" placeholder="sess_demo_001" />
+          </label>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="previewOnly" name="previewOnly" />
+          <span>Preview only — build JSON, do not call the API</span>
+        </label>
+      </section>
+
+      <section class="section">
+        <h2>Payment method</h2>
+        <p class="muted">Choose how this procurement session will be funded. The payload below mirrors <code>POST /api/v7/sessions/{id}/funding-method</code>.</p>
+
+        <div class="method-grid" role="radiogroup" aria-label="Payment method">
+          <label class="method-option">
+            <input type="radio" name="method" value="usdc" checked />
+            <span class="method-face">
+              <span class="method-title">USDC</span>
+              <span class="method-sub">On-chain stablecoin</span>
+            </span>
+          </label>
+          <label class="method-option">
+            <input type="radio" name="method" value="card" />
+            <span class="method-face">
+              <span class="method-title">Card</span>
+              <span class="method-sub">Credit or debit</span>
+            </span>
+          </label>
+          <label class="method-option">
+            <input type="radio" name="method" value="bank_transfer" />
+            <span class="method-face">
+              <span class="method-title">ACH</span>
+              <span class="method-sub">US bank transfer</span>
+            </span>
+          </label>
+        </div>
+      </section>
+
+      <section class="section panel" id="panel-usdc" data-panel="usdc">
+        <h3>Network</h3>
+        <label class="field">
+          <span>Blockchain network</span>
+          <select id="network" name="network">
+            <option value="base" selected>Base (recommended)</option>
+            <option value="arbitrum">Arbitrum</option>
+            <option value="polygon">Polygon</option>
+            <option value="ethereum">Ethereum</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="section panel" id="panel-card" data-panel="card" hidden>
+        <h3>Card</h3>
+        <p class="muted">Card collection is handled by your PCI-compliant vault in production. This demo only binds <code>method: "card"</code>.</p>
+      </section>
+
+      <section class="section panel" id="panel-ach" data-panel="bank_transfer" hidden>
+        <h3>ACH bank account</h3>
+        <div class="field-grid">
+          <label class="field">
+            <span>Routing number <em>(ABA, 9 digits)</em></span>
+            <input id="routing_number" name="routing_number" inputmode="numeric" autocomplete="off" maxlength="9" placeholder="021000021" />
+          </label>
+          <label class="field">
+            <span>Account number</span>
+            <input id="account_number" name="account_number" inputmode="numeric" autocomplete="off" maxlength="17" placeholder="123456789012" />
+          </label>
+          <label class="field">
+            <span>Account type</span>
+            <select id="account_type" name="account_type">
+              <option value="checking" selected>Checking</option>
+              <option value="savings">Savings</option>
+            </select>
+          </label>
+          <label class="field field-span">
+            <span>Account holder name</span>
+            <input id="account_holder_name" name="account_holder_name" autocomplete="name" maxlength="100" placeholder="Acme Procurement LLC" />
+          </label>
+        </div>
+        <p class="hint">Send routing and account numbers as strings so leading zeros are preserved. Full account numbers are never returned by the API.</p>
+      </section>
+
+      <p class="form-error" id="formError" hidden role="alert"></p>
+
+      <div class="actions">
+        <button type="button" class="btn btn-primary" id="submitBtn">Submit funding method</button>
+        <button type="button" class="btn btn-ghost" id="resetBtn">Reset form</button>
+      </div>
+    </main>
+
+    <aside class="card payload-card">
+      <div class="payload-header">
+        <h2>Request</h2>
+        <span class="badge" id="payloadBadge">Idle</span>
+      </div>
+      <p class="muted endpoint">
+        <span class="verb">POST</span>
+        <code id="endpointPath">/api/v7/sessions/sess_demo_001/funding-method</code>
+      </p>
+      <pre id="payloadOut" class="payload" aria-live="polite">{ /* choose a method and submit */ }</pre>
+      <p class="hint" id="requestHint">Live POST uses Authorization: Bearer and Content-Type: application/json. Enable Preview only to skip the network call.</p>
+    </aside>
+
+    <aside class="card payload-card" id="responseCard">
+      <div class="payload-header">
+        <h2>Response</h2>
+        <span class="badge" id="responseBadge">—</span>
+      </div>
+      <p class="muted" id="responseMeta">No response yet.</p>
+      <pre id="responseOut" class="payload" aria-live="polite">{ /* submit to see status and body */ }</pre>
+    </aside>
+
+    <footer class="footer">
+      <p>Institutional checkout demo · Omnipay / ProcureNet docs</p>
+    </footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
